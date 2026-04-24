@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react'
 import './App.css'
+import {
+  isCloudEnabled,
+  loadProjectsFromCloud,
+  loadStaffFromCloud,
+  saveProjectsToCloud,
+  saveStaffToCloud,
+} from './lib/cloudStore'
 
 const TARGET_SHEETS = new Set(['江都', '省建', '科林'])
 const normalize = (value) => String(value ?? '').trim()
@@ -248,18 +255,37 @@ function App() {
   }, [])
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(PROJECTS_STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) {
-          setProjects(parsed)
+    let cancelled = false
+    void (async () => {
+      try {
+        const raw = window.localStorage.getItem(PROJECTS_STORAGE_KEY)
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (Array.isArray(parsed) && !cancelled) {
+            setProjects(parsed)
+          }
+        }
+      } catch (error) {
+        console.error('读取项目缓存失败', error)
+      }
+
+      if (isCloudEnabled()) {
+        try {
+          const cloudProjects = await loadProjectsFromCloud()
+          if (Array.isArray(cloudProjects) && !cancelled) {
+            setProjects(cloudProjects)
+          }
+        } catch (error) {
+          console.error('读取云端工单失败', error)
         }
       }
-    } catch (error) {
-      console.error('读取项目缓存失败', error)
-    } finally {
-      setProjectsHydrated(true)
+
+      if (!cancelled) {
+        setProjectsHydrated(true)
+      }
+    })()
+    return () => {
+      cancelled = true
     }
   }, [])
 
@@ -271,6 +297,11 @@ function App() {
       window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects))
     } catch (error) {
       console.error('保存项目缓存失败', error)
+    }
+    if (isCloudEnabled()) {
+      void saveProjectsToCloud(projects).catch((error) => {
+        console.error('保存云端工单失败', error)
+      })
     }
   }, [projects, projectsHydrated])
 
@@ -294,7 +325,44 @@ function App() {
       }
       console.error('保存人员名单缓存失败', error)
     }
+    if (isCloudEnabled()) {
+      void saveStaffToCloud({
+        managers,
+        workers,
+        staffFileName,
+        lockIntent: staffFileLocked,
+      }).catch((error) => {
+        console.error('保存云端人员名单失败', error)
+      })
+    }
   }, [managers, workers, staffFileName, staffFileLocked])
+
+  /** 云端人员名单恢复（若存在云端数据，优先覆盖本地缓存） */
+  useEffect(() => {
+    if (!isCloudEnabled()) {
+      return undefined
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const cloudStaff = await loadStaffFromCloud()
+        if (
+          !cancelled &&
+          cloudStaff &&
+          Array.isArray(cloudStaff.managers) &&
+          Array.isArray(cloudStaff.workers)
+        ) {
+          applyStaffResult(cloudStaff, cloudStaff.staffFileName || '云端名单')
+          setStaffFileLocked(Boolean(cloudStaff.lockIntent))
+        }
+      } catch (error) {
+        console.error('读取云端人员名单失败', error)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [applyStaffResult])
 
   /** 从 IndexedDB 恢复上次锁定的 Excel 文件句柄（用于检测磁盘文件是否更新；失败时仍保留 localStorage 中的名单） */
   useEffect(() => {
@@ -704,6 +772,7 @@ function App() {
       )}
       <p className="staff-tip">
         名单: {staffFileName || '未导入'} | 管理人员 {managers.length} 人 | 工人 {workers.length} 人
+        {isCloudEnabled() ? ' | 云端同步已启用（免费 Supabase）' : ' | 当前仅本地缓存'}
         {staffFileLocked
           ? ' | 已锁定（名单已存本机浏览器，刷新保留；若文件句柄有效，保存 Excel 后约 8 秒内自动更新）'
           : ' | 名单已缓存到本机浏览器（刷新保留）'}
