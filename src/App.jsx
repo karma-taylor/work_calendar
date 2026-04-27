@@ -204,6 +204,40 @@ const hasDateOverlap = (startA, endA, startB, endB) => {
   return aStart <= bEnd && bStart <= aEnd
 }
 
+const createEmptyAssignment = (startDate, endDate) => ({
+  id: crypto.randomUUID(),
+  personId: '',
+  role: 'worker',
+  segmentStart: startDate,
+  segmentEnd: endDate,
+  note: '',
+})
+
+const getProjectAssignments = (project) => {
+  if (Array.isArray(project.assignments) && project.assignments.length > 0) {
+    return project.assignments
+  }
+  const start = project.startDate
+  const end = project.endDate
+  const legacyManagers = (project.managerIds || []).map((personId) => ({
+    id: `${project.id}-legacy-manager-${personId}`,
+    personId,
+    role: 'manager',
+    segmentStart: start,
+    segmentEnd: end,
+    note: '',
+  }))
+  const legacyWorkers = (project.workerIds || []).map((personId) => ({
+    id: `${project.id}-legacy-worker-${personId}`,
+    personId,
+    role: 'worker',
+    segmentStart: start,
+    segmentEnd: end,
+    note: '',
+  }))
+  return [...legacyManagers, ...legacyWorkers]
+}
+
 function App() {
   const [currentYear, setCurrentYear] = useState(today.getFullYear())
   const [currentMonth, setCurrentMonth] = useState(today.getMonth())
@@ -232,6 +266,7 @@ function App() {
     workerEnabled: false,
     managerIds: [],
     workerIds: [],
+    assignments: [],
   })
 
   const applyStaffResult = useCallback((result, fileName) => {
@@ -487,6 +522,7 @@ function App() {
     () => Array.from({ length: 6 }, (_, index) => days.slice(index * 7, index * 7 + 7)),
     [days],
   )
+  const allPeople = useMemo(() => [...managers, ...workers], [managers, workers])
 
   const togglePerson = (field, id) => {
     setForm((prev) => {
@@ -495,6 +531,67 @@ function App() {
         ...prev,
         [field]: exists ? prev[field].filter((item) => item !== id) : [...prev[field], id],
       }
+    })
+  }
+
+  const addAssignmentRow = () => {
+    setForm((prev) => ({
+      ...prev,
+      assignments: [...prev.assignments, createEmptyAssignment(prev.startDate, prev.endDate)],
+    }))
+  }
+
+  const updateAssignmentRow = (rowId, patch) => {
+    setForm((prev) => ({
+      ...prev,
+      assignments: prev.assignments.map((row) => (row.id === rowId ? { ...row, ...patch } : row)),
+    }))
+  }
+
+  const removeAssignmentRow = (rowId) => {
+    setForm((prev) => ({
+      ...prev,
+      assignments: prev.assignments.filter((row) => row.id !== rowId),
+    }))
+  }
+
+  const duplicateAssignmentRow = (rowId) => {
+    setForm((prev) => {
+      const source = prev.assignments.find((row) => row.id === rowId)
+      if (!source) {
+        return prev
+      }
+      return {
+        ...prev,
+        assignments: [
+          ...prev.assignments,
+          {
+            ...source,
+            id: crypto.randomUUID(),
+          },
+        ],
+      }
+    })
+  }
+
+  const applyProjectDateChange = (field, value) => {
+    setForm((prev) => {
+      const next = { ...prev, [field]: value }
+      next.assignments = prev.assignments.map((row) => {
+        let segmentStart = row.segmentStart
+        let segmentEnd = row.segmentEnd
+        if (segmentStart < next.startDate) {
+          segmentStart = next.startDate
+        }
+        if (segmentEnd > next.endDate) {
+          segmentEnd = next.endDate
+        }
+        if (segmentStart > segmentEnd) {
+          segmentEnd = segmentStart
+        }
+        return { ...row, segmentStart, segmentEnd }
+      })
+      return next
     })
   }
 
@@ -508,6 +605,7 @@ function App() {
       workerEnabled: false,
       managerIds: [],
       workerIds: [],
+      assignments: [],
     })
   }
 
@@ -530,50 +628,122 @@ function App() {
       return
     }
 
+    const normalizedAssignments =
+      form.assignments.length > 0
+        ? form.assignments
+        : [
+            ...form.managerIds.map((personId) => ({
+              id: crypto.randomUUID(),
+              personId,
+              role: 'manager',
+              segmentStart: form.startDate,
+              segmentEnd: form.endDate,
+              note: '',
+            })),
+            ...form.workerIds.map((personId) => ({
+              id: crypto.randomUUID(),
+              personId,
+              role: 'worker',
+              segmentStart: form.startDate,
+              segmentEnd: form.endDate,
+              note: '',
+            })),
+          ]
+
+    if (normalizedAssignments.length === 0) {
+      window.alert('请至少添加一条人员分段安排')
+      return
+    }
+
+    const invalidAssignment = normalizedAssignments.find((assignment) => {
+      if (!assignment.personId) {
+        return true
+      }
+      if (assignment.segmentStart > assignment.segmentEnd) {
+        return true
+      }
+      if (assignment.segmentStart < form.startDate || assignment.segmentEnd > form.endDate) {
+        return true
+      }
+      return false
+    })
+    if (invalidAssignment) {
+      window.alert('人员分段安排有误：请检查人员、时间区间，并确保在工单日期范围内。')
+      return
+    }
+
     const peopleById = new Map(
       [...managers, ...workers].map((person) => [person.id, person]),
     )
-    const currentPeople = new Set(
-      [...form.managerIds, ...form.workerIds]
-        .map((id) => peopleById.get(id))
-        .filter(Boolean)
-        .map(personUniqueKey),
-    )
-
-    const conflictProject = projects.find((project) => {
-      if (!hasDateOverlap(form.startDate, form.endDate, project.startDate, project.endDate)) {
-        return false
+    const conflictHits = []
+    for (const existingProject of projects) {
+      const existingAssignments = getProjectAssignments(existingProject)
+      for (const currentAssignment of normalizedAssignments) {
+        const currentPerson = peopleById.get(currentAssignment.personId)
+        if (!currentPerson) {
+          continue
+        }
+        const currentPersonKey = personUniqueKey(currentPerson)
+        for (const existingAssignment of existingAssignments) {
+          const existingPerson = peopleById.get(existingAssignment.personId)
+          if (!existingPerson) {
+            continue
+          }
+          if (personUniqueKey(existingPerson) !== currentPersonKey) {
+            continue
+          }
+          if (
+            hasDateOverlap(
+              currentAssignment.segmentStart,
+              currentAssignment.segmentEnd,
+              existingAssignment.segmentStart,
+              existingAssignment.segmentEnd,
+            )
+          ) {
+            conflictHits.push({
+              personLabel: `${currentPerson.name}(${currentPerson.sourceSheet})`,
+              projectName: existingProject.name,
+            })
+          }
+        }
       }
-      const projectPeople = new Set(
-        [...project.managerIds, ...project.workerIds]
-          .map((id) => peopleById.get(id))
-          .filter(Boolean)
-          .map(personUniqueKey),
-      )
-      return [...currentPeople].some((key) => projectPeople.has(key))
-    })
+    }
 
-    if (conflictProject) {
-      const projectPeople = new Set(
-        [...conflictProject.managerIds, ...conflictProject.workerIds]
-          .map((id) => peopleById.get(id))
-          .filter(Boolean)
-          .map(personUniqueKey),
+    if (conflictHits.length > 0) {
+      const uniqueConflicts = Array.from(
+        new Set(conflictHits.map((hit) => `${hit.personLabel} -> ${hit.projectName}`)),
       )
-      const conflictedNames = [...currentPeople]
-        .filter((key) => projectPeople.has(key))
-        .map((key) => key.replace('@@', '(') + ')')
       window.alert(
-        `人员冲突：${conflictedNames.join('、')} 在同时间已分配到项目「${conflictProject.name}」，一个人不能同时参与两个项目。`,
+        `人员冲突：\n${uniqueConflicts.join('\n')}\n\n同一人同一时间不能分配到两个工单。`,
       )
       return
     }
+
+    const managerIds = Array.from(
+      new Set(
+        normalizedAssignments
+          .filter((assignment) => assignment.role === 'manager')
+          .map((assignment) => assignment.personId),
+      ),
+    )
+    const workerIds = Array.from(
+      new Set(
+        normalizedAssignments
+          .filter((assignment) => assignment.role === 'worker')
+          .map((assignment) => assignment.personId),
+      ),
+    )
 
     setProjects((prev) => [
       ...prev,
       {
         id: crypto.randomUUID(),
         ...form,
+        assignments: normalizedAssignments,
+        managerIds,
+        workerIds,
+        managerEnabled: managerIds.length > 0,
+        workerEnabled: workerIds.length > 0,
       },
     ])
     closeModal()
@@ -855,9 +1025,7 @@ function App() {
                 <input
                   type="date"
                   value={form.startDate}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, startDate: event.target.value }))
-                  }
+                  onChange={(event) => applyProjectDateChange('startDate', event.target.value)}
                 />
               </label>
               <label>
@@ -865,9 +1033,7 @@ function App() {
                 <input
                   type="date"
                   value={form.endDate}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, endDate: event.target.value }))
-                  }
+                  onChange={(event) => applyProjectDateChange('endDate', event.target.value)}
                 />
               </label>
             </div>
@@ -932,11 +1098,83 @@ function App() {
               </fieldset>
             )}
 
+            <fieldset>
+              <legend>人员分段安排（推荐）</legend>
+              <p className="assignment-tip">
+                可为同一工单添加多拨人员，并设置各自参与时间段。若不填写，将按上方选择自动视为全程参与。
+              </p>
+              <div className="assignment-rows">
+                {form.assignments.length === 0 && (
+                  <div className="assignment-empty">暂未添加分段安排</div>
+                )}
+                {form.assignments.map((row) => (
+                  <div className="assignment-row" key={row.id}>
+                    <select
+                      value={row.personId}
+                      onChange={(event) => updateAssignmentRow(row.id, { personId: event.target.value })}
+                    >
+                      <option value="">选择人员</option>
+                      {allPeople.map((person) => (
+                        <option key={person.id} value={person.id}>
+                          {person.name}({person.sourceSheet})
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={row.role}
+                      onChange={(event) => updateAssignmentRow(row.id, { role: event.target.value })}
+                    >
+                      <option value="manager">管理人员</option>
+                      <option value="worker">工人</option>
+                    </select>
+                    <input
+                      type="date"
+                      value={row.segmentStart}
+                      min={form.startDate}
+                      max={form.endDate}
+                      onChange={(event) =>
+                        updateAssignmentRow(row.id, { segmentStart: event.target.value })
+                      }
+                    />
+                    <input
+                      type="date"
+                      value={row.segmentEnd}
+                      min={form.startDate}
+                      max={form.endDate}
+                      onChange={(event) =>
+                        updateAssignmentRow(row.id, { segmentEnd: event.target.value })
+                      }
+                    />
+                    <div className="assignment-actions">
+                      <button
+                        type="button"
+                        className="secondary-btn small"
+                        onClick={() => duplicateAssignmentRow(row.id)}
+                      >
+                        复制
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-btn small"
+                        onClick={() => removeAssignmentRow(row.id)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="secondary-btn" onClick={addAssignmentRow}>
+                + 添加分段安排
+              </button>
+            </fieldset>
+
             <div className="picked-summary">
               <div>
                 管理人员: {form.managerIds.length > 0 ? getDisplayName(managers, form.managerIds) : '未选择'}
               </div>
               <div>工人: {form.workerIds.length > 0 ? getDisplayName(workers, form.workerIds) : '未选择'}</div>
+              <div>分段安排: {form.assignments.length} 条</div>
             </div>
 
             <div className="modal-actions">
@@ -972,6 +1210,39 @@ function App() {
               {selectedProject.workerIds.length > 0
                 ? getDisplayName(workers, selectedProject.workerIds)
                 : '无'}
+            </div>
+            <div className="detail-item">
+              <strong>分段安排（按人员分组）:</strong>
+              <div className="assignment-list">
+                {getProjectAssignments(selectedProject).length === 0 && <div>无</div>}
+                {Object.entries(
+                  getProjectAssignments(selectedProject).reduce((acc, row) => {
+                    const person = allPeople.find((item) => item.id === row.personId)
+                    const key = person
+                      ? `${person.name}(${person.sourceSheet})`
+                      : `未知人员(${row.personId || '未选择'})`
+                    if (!acc[key]) {
+                      acc[key] = []
+                    }
+                    acc[key].push(row)
+                    return acc
+                  }, {}),
+                ).map(([personLabel, rows]) => (
+                  <div key={personLabel} className="assignment-group">
+                    <div className="assignment-group-title">{personLabel}</div>
+                    {rows
+                      .slice()
+                      .sort((a, b) => a.segmentStart.localeCompare(b.segmentStart))
+                      .map((row) => (
+                        <div key={row.id} className="assignment-list-item">
+                          {(row.role === 'manager' ? '管理' : '工人') +
+                            ` | ${row.segmentStart} ~ ${row.segmentEnd}` +
+                            (row.note ? ` | 备注: ${row.note}` : '')}
+                        </div>
+                      ))}
+                  </div>
+                ))}
+              </div>
             </div>
             <div className="modal-actions">
               {deleteMode && (
