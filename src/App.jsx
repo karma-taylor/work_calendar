@@ -239,6 +239,7 @@ const getProjectAssignments = (project) => {
 }
 
 function MultiPeoplePicker({ options, selectedIds, onChange, placeholder }) {
+  const detailsRef = useRef(null)
   const [keyword, setKeyword] = useState('')
   const selectedSet = useMemo(() => new Set(selectedIds || []), [selectedIds])
   const filteredOptions = useMemo(() => {
@@ -263,7 +264,7 @@ function MultiPeoplePicker({ options, selectedIds, onChange, placeholder }) {
     selectedIds?.length > 0 ? `已选 ${selectedIds.length} 人` : placeholder || '选择人员'
 
   return (
-    <details className="people-picker">
+    <details className="people-picker" ref={detailsRef}>
       <summary className="people-picker-summary">{summaryText}</summary>
       <div className="people-picker-panel">
         <input
@@ -282,6 +283,13 @@ function MultiPeoplePicker({ options, selectedIds, onChange, placeholder }) {
           </button>
           <button type="button" className="secondary-btn small" onClick={() => onChange([])}>
             清空
+          </button>
+          <button
+            type="button"
+            className="secondary-btn small"
+            onClick={() => detailsRef.current?.removeAttribute('open')}
+          >
+            关闭选项
           </button>
         </div>
         <div className="people-picker-list">
@@ -669,7 +677,7 @@ function App() {
   const submitProject = (event) => {
     event.preventDefault()
     if (!form.name.trim()) {
-      window.alert('请填写项目名称')
+      window.alert('请填写工单名称')
       return
     }
     if (form.startDate > form.endDate) {
@@ -985,7 +993,7 @@ function App() {
             <input type="file" accept=".xlsx,.xls" onChange={handleStaffFile} />
           </label>
           <button className="create-btn" type="button" onClick={() => setShowModal(true)}>
-            创建项目
+            创建工单
           </button>
         </div>
       </header>
@@ -1061,16 +1069,16 @@ function App() {
       {showModal && (
         <div className="modal-mask">
           <form className="project-modal" onSubmit={submitProject}>
-            <h2>新建项目</h2>
+            <h2>新建工单</h2>
 
             <label>
-              项目名称
+              工单名称
               <input
                 value={form.name}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, name: event.target.value }))
                 }
-                placeholder="请输入项目名称"
+                placeholder="请输入工单名称"
               />
             </label>
 
@@ -1211,7 +1219,7 @@ function App() {
                 取消
               </button>
               <button className="create-btn" type="submit">
-                创建项目
+                创建工单
               </button>
             </div>
           </form>
@@ -1223,7 +1231,7 @@ function App() {
           <div className="project-modal details-modal">
             <h2>项目详情</h2>
             <div className="detail-item">
-              <strong>项目名称:</strong> {selectedProject.name}
+              <strong>工单名称:</strong> {selectedProject.name}
             </div>
             <div className="detail-item">
               <strong>时间:</strong> {selectedProject.startDate} ~ {selectedProject.endDate}
