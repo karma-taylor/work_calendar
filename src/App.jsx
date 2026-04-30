@@ -3,6 +3,7 @@ import './App.css'
 import {
   isCloudEnabled,
   loadProjectsFromCloud,
+  loadProjectsSnapshotFromCloud,
   loadStaffFromCloud,
   saveProjectsToCloud,
   saveStaffToCloud,
@@ -385,9 +386,26 @@ function App() {
           const cloudProjects = await loadProjectsFromCloud()
           if (Array.isArray(cloudProjects) && !cancelled) {
             setProjects(cloudProjects)
+          } else if (!cancelled) {
+            const snapshotProjects = await loadProjectsSnapshotFromCloud()
+            if (Array.isArray(snapshotProjects)) {
+              setProjects(snapshotProjects)
+              window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(snapshotProjects))
+              console.warn('主云端工单为空，已自动从最近快照恢复。')
+            }
           }
         } catch (error) {
           console.error('读取云端工单失败', error)
+          try {
+            const snapshotProjects = await loadProjectsSnapshotFromCloud()
+            if (Array.isArray(snapshotProjects) && !cancelled) {
+              setProjects(snapshotProjects)
+              window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(snapshotProjects))
+              console.warn('主云端工单读取失败，已自动从最近快照恢复。')
+            }
+          } catch (snapshotError) {
+            console.error('读取云端工单快照失败', snapshotError)
+          }
         }
       }
 
