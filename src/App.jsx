@@ -206,8 +206,9 @@ const hasDateOverlap = (startA, endA, startB, endB) => {
 
 const createEmptyAssignment = (startDate, endDate) => ({
   id: crypto.randomUUID(),
-  personId: '',
+  personIds: [],
   role: 'worker',
+  trade: '',
   segmentStart: startDate,
   segmentEnd: endDate,
   note: '',
@@ -262,10 +263,6 @@ function App() {
     name: '',
     startDate: toInputDate(today),
     endDate: toInputDate(today),
-    managerEnabled: false,
-    workerEnabled: false,
-    managerIds: [],
-    workerIds: [],
     assignments: [],
   })
 
@@ -280,12 +277,14 @@ function App() {
     setStaffFileName(fileName)
     setForm((prev) => ({
       ...prev,
-      managerIds: prev.managerIds.filter((id) =>
-        result.managers.some((manager) => manager.id === id),
-      ),
-      workerIds: prev.workerIds.filter((id) =>
-        result.workers.some((worker) => worker.id === id),
-      ),
+      assignments: prev.assignments.map((row) => {
+        const rolePeople = row.role === 'manager' ? result.managers : result.workers
+        const roleIds = new Set(rolePeople.map((person) => person.id))
+        return {
+          ...row,
+          personIds: (row.personIds || []).filter((id) => roleIds.has(id)),
+        }
+      }),
     }))
   }, [])
 
@@ -524,16 +523,6 @@ function App() {
   )
   const allPeople = useMemo(() => [...managers, ...workers], [managers, workers])
 
-  const togglePerson = (field, id) => {
-    setForm((prev) => {
-      const exists = prev[field].includes(id)
-      return {
-        ...prev,
-        [field]: exists ? prev[field].filter((item) => item !== id) : [...prev[field], id],
-      }
-    })
-  }
-
   const addAssignmentRow = () => {
     setForm((prev) => ({
       ...prev,
@@ -568,6 +557,7 @@ function App() {
           {
             ...source,
             id: crypto.randomUUID(),
+            personIds: [...(source.personIds || [])],
           },
         ],
       }
@@ -603,10 +593,6 @@ function App() {
       name: '',
       startDate: toInputDate(today),
       endDate: toInputDate(today),
-      managerEnabled: false,
-      workerEnabled: false,
-      managerIds: [],
-      workerIds: [],
       assignments: [],
     })
   }
@@ -621,36 +607,17 @@ function App() {
       window.alert('结束日期不能早于开始日期')
       return
     }
-    if (form.managerEnabled && form.managerIds.length === 0) {
-      window.alert('请至少选择一位管理人员')
-      return
-    }
-    if (form.workerEnabled && form.workerIds.length === 0) {
-      window.alert('请至少选择一位工人')
-      return
-    }
-
-    const normalizedAssignments =
-      form.assignments.length > 0
-        ? form.assignments
-        : [
-            ...form.managerIds.map((personId) => ({
-              id: crypto.randomUUID(),
-              personId,
-              role: 'manager',
-              segmentStart: form.startDate,
-              segmentEnd: form.endDate,
-              note: '',
-            })),
-            ...form.workerIds.map((personId) => ({
-              id: crypto.randomUUID(),
-              personId,
-              role: 'worker',
-              segmentStart: form.startDate,
-              segmentEnd: form.endDate,
-              note: '',
-            })),
-          ]
+    const normalizedAssignments = form.assignments.flatMap((row) =>
+      (row.personIds || []).map((personId) => ({
+        id: crypto.randomUUID(),
+        personId,
+        role: row.role || 'worker',
+        trade: row.trade || '',
+        segmentStart: row.segmentStart,
+        segmentEnd: row.segmentEnd,
+        note: row.note || '',
+      })),
+    )
 
     if (normalizedAssignments.length === 0) {
       window.alert('请至少添加一条人员分段安排')
@@ -1040,70 +1007,10 @@ function App() {
               </label>
             </div>
 
-            <div className="switch-row">
-              <span>创建管理人员</span>
-              <input
-                type="checkbox"
-                checked={form.managerEnabled}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, managerEnabled: event.target.checked }))
-                }
-              />
-            </div>
-
-            {form.managerEnabled && (
-              <fieldset>
-                <legend>选择管理人员</legend>
-                <div className="select-grid">
-                  {managers.length === 0 && <div>请先导入人员 Excel</div>}
-                  {managers.map((manager) => (
-                    <label key={manager.id}>
-                      <input
-                        type="checkbox"
-                        checked={form.managerIds.includes(manager.id)}
-                        onChange={() => togglePerson('managerIds', manager.id)}
-                      />
-                      {manager.name}({manager.sourceSheet})
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            )}
-
-            <div className="switch-row">
-              <span>创建工人</span>
-              <input
-                type="checkbox"
-                checked={form.workerEnabled}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, workerEnabled: event.target.checked }))
-                }
-              />
-            </div>
-
-            {form.workerEnabled && (
-              <fieldset>
-                <legend>选择工人</legend>
-                <div className="select-grid">
-                  {workers.length === 0 && <div>请先导入人员 Excel</div>}
-                  {workers.map((worker) => (
-                    <label key={worker.id}>
-                      <input
-                        type="checkbox"
-                        checked={form.workerIds.includes(worker.id)}
-                        onChange={() => togglePerson('workerIds', worker.id)}
-                      />
-                      {worker.name}({worker.sourceSheet})
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            )}
-
             <fieldset>
               <legend>人员分段安排（推荐）</legend>
               <p className="assignment-tip">
-                可为同一工单添加多拨人员，并设置各自参与时间段。若不填写，将按上方选择自动视为全程参与。
+                仅保留矩阵安排。每行可一次选择多人，并设置角色、工种和参与时间段。
               </p>
               <div className="assignment-rows">
                 {form.assignments.length === 0 && (
@@ -1117,12 +1024,16 @@ function App() {
                       return (
                         <>
                           <select
-                            value={row.personId}
+                            multiple
+                            value={row.personIds || []}
                             onChange={(event) =>
-                              updateAssignmentRow(row.id, { personId: event.target.value })
+                              updateAssignmentRow(row.id, {
+                                personIds: Array.from(event.target.selectedOptions).map(
+                                  (option) => option.value,
+                                ),
+                              })
                             }
                           >
-                            <option value="">选择人员</option>
                             {rolePeople.map((person) => (
                               <option key={person.id} value={person.id}>
                                 {person.name}({person.sourceSheet})
@@ -1134,18 +1045,23 @@ function App() {
                             onChange={(event) => {
                               const nextRole = event.target.value
                               const nextRolePeople = getPeopleByRole(nextRole)
-                              const keepPerson = nextRolePeople.some(
-                                (person) => person.id === row.personId,
-                              )
+                              const nextRoleIds = new Set(nextRolePeople.map((person) => person.id))
                               updateAssignmentRow(row.id, {
                                 role: nextRole,
-                                personId: keepPerson ? row.personId : '',
+                                personIds: (row.personIds || []).filter((id) => nextRoleIds.has(id)),
                               })
                             }}
                           >
                             <option value="manager">管理人员</option>
                             <option value="worker">工人</option>
                           </select>
+                          <input
+                            value={row.trade || ''}
+                            onChange={(event) =>
+                              updateAssignmentRow(row.id, { trade: event.target.value })
+                            }
+                            placeholder="工种（如：电工）"
+                          />
                         </>
                       )
                     })()}
@@ -1192,10 +1108,6 @@ function App() {
             </fieldset>
 
             <div className="picked-summary">
-              <div>
-                管理人员: {form.managerIds.length > 0 ? getDisplayName(managers, form.managerIds) : '未选择'}
-              </div>
-              <div>工人: {form.workerIds.length > 0 ? getDisplayName(workers, form.workerIds) : '未选择'}</div>
               <div>分段安排: {form.assignments.length} 条</div>
             </div>
 
@@ -1259,6 +1171,7 @@ function App() {
                         <div key={row.id} className="assignment-list-item">
                           {(row.role === 'manager' ? '管理' : '工人') +
                             ` | ${row.segmentStart} ~ ${row.segmentEnd}` +
+                            (row.trade ? ` | 工种: ${row.trade}` : '') +
                             (row.note ? ` | 备注: ${row.note}` : '')}
                         </div>
                       ))}

@@ -329,7 +329,7 @@ fieldset {
 
 .assignment-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr auto;
+  grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto;
   gap: 8px;
   align-items: center;
 }
@@ -339,6 +339,10 @@ fieldset {
   border: 1px solid #d0d5dd;
   border-radius: 10px;
   padding: 8px 10px;
+}
+
+.assignment-row select[multiple] {
+  min-height: 84px;
 }
 
 .modal-actions {
