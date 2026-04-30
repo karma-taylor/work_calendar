@@ -412,6 +412,17 @@ fieldset {
   align-items: center;
 }
 
+.manager-candidate-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.manager-candidate-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .picked-summary {
   background: #f3f7ff;
   border-radius: 12px;

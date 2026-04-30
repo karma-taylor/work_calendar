@@ -1117,28 +1117,39 @@ function App() {
                 {form.managerIds.length > 0 ? getDisplayName(managers, form.managerIds) : '未选择'}
               </div>
               {showManagerCandidates && (
-                <div className="select-grid">
-                  {managers.length === 0 && <div>请先导入人员 Excel</div>}
-                  {managers.map((manager) => (
-                    <label key={manager.id}>
-                      <input
-                        type="checkbox"
-                        checked={form.managerIds.includes(manager.id)}
-                        onChange={() =>
-                          setForm((prev) => {
-                            const exists = prev.managerIds.includes(manager.id)
-                            return {
-                              ...prev,
-                              managerIds: exists
-                                ? prev.managerIds.filter((item) => item !== manager.id)
-                                : [...prev.managerIds, manager.id],
-                            }
-                          })
-                        }
-                      />
-                      {manager.name}({manager.sourceSheet})
-                    </label>
-                  ))}
+                <div className="manager-candidate-wrap">
+                  <div className="select-grid">
+                    {managers.length === 0 && <div>请先导入人员 Excel</div>}
+                    {managers.map((manager) => (
+                      <label key={manager.id}>
+                        <input
+                          type="checkbox"
+                          checked={form.managerIds.includes(manager.id)}
+                          onChange={() =>
+                            setForm((prev) => {
+                              const exists = prev.managerIds.includes(manager.id)
+                              return {
+                                ...prev,
+                                managerIds: exists
+                                  ? prev.managerIds.filter((item) => item !== manager.id)
+                                  : [...prev.managerIds, manager.id],
+                              }
+                            })
+                          }
+                        />
+                        {manager.name}({manager.sourceSheet})
+                      </label>
+                    ))}
+                  </div>
+                  <div className="manager-candidate-actions">
+                    <button
+                      type="button"
+                      className="create-btn"
+                      onClick={() => setShowManagerCandidates(false)}
+                    >
+                      确定并关闭
+                    </button>
+                  </div>
                 </div>
               )}
             </fieldset>
