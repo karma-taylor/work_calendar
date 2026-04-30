@@ -574,6 +574,8 @@ function App() {
     })
   }
 
+  const getPeopleByRole = (role) => (role === 'manager' ? managers : workers)
+
   const applyProjectDateChange = (field, value) => {
     setForm((prev) => {
       const next = { ...prev, [field]: value }
@@ -1109,24 +1111,44 @@ function App() {
                 )}
                 {form.assignments.map((row) => (
                   <div className="assignment-row" key={row.id}>
-                    <select
-                      value={row.personId}
-                      onChange={(event) => updateAssignmentRow(row.id, { personId: event.target.value })}
-                    >
-                      <option value="">选择人员</option>
-                      {allPeople.map((person) => (
-                        <option key={person.id} value={person.id}>
-                          {person.name}({person.sourceSheet})
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={row.role}
-                      onChange={(event) => updateAssignmentRow(row.id, { role: event.target.value })}
-                    >
-                      <option value="manager">管理人员</option>
-                      <option value="worker">工人</option>
-                    </select>
+                    {/** 候选人严格按当前分段角色过滤，避免“角色=工人却选到管理人员” */}
+                    {(() => {
+                      const rolePeople = getPeopleByRole(row.role)
+                      return (
+                        <>
+                          <select
+                            value={row.personId}
+                            onChange={(event) =>
+                              updateAssignmentRow(row.id, { personId: event.target.value })
+                            }
+                          >
+                            <option value="">选择人员</option>
+                            {rolePeople.map((person) => (
+                              <option key={person.id} value={person.id}>
+                                {person.name}({person.sourceSheet})
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={row.role}
+                            onChange={(event) => {
+                              const nextRole = event.target.value
+                              const nextRolePeople = getPeopleByRole(nextRole)
+                              const keepPerson = nextRolePeople.some(
+                                (person) => person.id === row.personId,
+                              )
+                              updateAssignmentRow(row.id, {
+                                role: nextRole,
+                                personId: keepPerson ? row.personId : '',
+                              })
+                            }}
+                          >
+                            <option value="manager">管理人员</option>
+                            <option value="worker">工人</option>
+                          </select>
+                        </>
+                      )
+                    })()}
                     <input
                       type="date"
                       value={row.segmentStart}
