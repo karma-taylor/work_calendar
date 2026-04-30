@@ -319,6 +319,7 @@ function App() {
   /** 避免首屏用空数组覆盖 localStorage（必须在读完缓存后才允许写入） */
   const [projectsHydrated, setProjectsHydrated] = useState(false)
   const [showModal, setShowModal] = useState(false)
+  const [showManagerCandidates, setShowManagerCandidates] = useState(false)
   const [selectedProject, setSelectedProject] = useState(null)
   /** 开启后点击日历工单条可删除工单 */
   const [deleteMode, setDeleteMode] = useState(false)
@@ -653,6 +654,7 @@ function App() {
 
   const closeModal = () => {
     setShowModal(false)
+    setShowManagerCandidates(false)
     setForm({
       name: '',
       startDate: toInputDate(today),
@@ -1090,30 +1092,46 @@ function App() {
             </div>
 
             <fieldset>
-              <legend>创建管理人员</legend>
-              <div className="select-grid">
-                {managers.length === 0 && <div>请先导入人员 Excel</div>}
-                {managers.map((manager) => (
-                  <label key={manager.id}>
-                    <input
-                      type="checkbox"
-                      checked={form.managerIds.includes(manager.id)}
-                      onChange={() =>
-                        setForm((prev) => {
-                          const exists = prev.managerIds.includes(manager.id)
-                          return {
-                            ...prev,
-                            managerIds: exists
-                              ? prev.managerIds.filter((item) => item !== manager.id)
-                              : [...prev.managerIds, manager.id],
-                          }
-                        })
-                      }
-                    />
-                    {manager.name}({manager.sourceSheet})
-                  </label>
-                ))}
+              <div className="fieldset-head">
+                <legend>创建管理人员</legend>
+                <label className="inline-switch">
+                  <span>显示候选人</span>
+                  <input
+                    type="checkbox"
+                    checked={showManagerCandidates}
+                    onChange={(event) => setShowManagerCandidates(event.target.checked)}
+                  />
+                </label>
               </div>
+              <div className="selected-inline-tip">
+                已选管理人员：
+                {form.managerIds.length > 0 ? getDisplayName(managers, form.managerIds) : '未选择'}
+              </div>
+              {showManagerCandidates && (
+                <div className="select-grid">
+                  {managers.length === 0 && <div>请先导入人员 Excel</div>}
+                  {managers.map((manager) => (
+                    <label key={manager.id}>
+                      <input
+                        type="checkbox"
+                        checked={form.managerIds.includes(manager.id)}
+                        onChange={() =>
+                          setForm((prev) => {
+                            const exists = prev.managerIds.includes(manager.id)
+                            return {
+                              ...prev,
+                              managerIds: exists
+                                ? prev.managerIds.filter((item) => item !== manager.id)
+                                : [...prev.managerIds, manager.id],
+                            }
+                          })
+                        }
+                      />
+                      {manager.name}({manager.sourceSheet})
+                    </label>
+                  ))}
+                </div>
+              )}
             </fieldset>
 
             <fieldset>
