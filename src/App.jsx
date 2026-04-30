@@ -239,6 +239,40 @@ const getProjectAssignments = (project) => {
   return [...legacyManagers, ...legacyWorkers]
 }
 
+const getAssignmentsByDay = (project, allPeople) => {
+  const rows = getProjectAssignments(project)
+  const result = {}
+  rows.forEach((row) => {
+    if (!row?.segmentStart || !row?.segmentEnd) {
+      return
+    }
+    let cursor = toDayStart(row.segmentStart)
+    const end = toDayStart(row.segmentEnd)
+    while (cursor <= end) {
+      const dayKey = toInputDate(cursor)
+      const person = allPeople.find((item) => item.id === row.personId)
+      const personLabel = person
+        ? `${person.name}(${person.sourceSheet})`
+        : `未知人员(${row.personId || '未选择'})`
+      const line =
+        `${row.role === 'manager' ? '管理' : '工人'} | ${personLabel}` +
+        (row.trade ? ` | 工种: ${row.trade}` : '') +
+        (row.note ? ` | 备注: ${row.note}` : '')
+      if (!result[dayKey]) {
+        result[dayKey] = []
+      }
+      result[dayKey].push(line)
+      cursor = new Date(cursor.getTime() + MS_PER_DAY)
+    }
+  })
+  return Object.entries(result)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, lines]) => ({
+      day,
+      lines: Array.from(new Set(lines)),
+    }))
+}
+
 function MultiPeoplePicker({ options, selectedIds, onChange, placeholder }) {
   const detailsRef = useRef(null)
   const [keyword, setKeyword] = useState('')
@@ -1278,35 +1312,17 @@ function App() {
                 : '无'}
             </div>
             <div className="detail-item">
-              <strong>分段安排（按人员分组）:</strong>
+              <strong>分段安排（按日期分组）:</strong>
               <div className="assignment-list">
-                {getProjectAssignments(selectedProject).length === 0 && <div>无</div>}
-                {Object.entries(
-                  getProjectAssignments(selectedProject).reduce((acc, row) => {
-                    const person = allPeople.find((item) => item.id === row.personId)
-                    const key = person
-                      ? `${person.name}(${person.sourceSheet})`
-                      : `未知人员(${row.personId || '未选择'})`
-                    if (!acc[key]) {
-                      acc[key] = []
-                    }
-                    acc[key].push(row)
-                    return acc
-                  }, {}),
-                ).map(([personLabel, rows]) => (
-                  <div key={personLabel} className="assignment-group">
-                    <div className="assignment-group-title">{personLabel}</div>
-                    {rows
-                      .slice()
-                      .sort((a, b) => a.segmentStart.localeCompare(b.segmentStart))
-                      .map((row) => (
-                        <div key={row.id} className="assignment-list-item">
-                          {(row.role === 'manager' ? '管理' : '工人') +
-                            ` | ${row.segmentStart} ~ ${row.segmentEnd}` +
-                            (row.trade ? ` | 工种: ${row.trade}` : '') +
-                            (row.note ? ` | 备注: ${row.note}` : '')}
-                        </div>
-                      ))}
+                {getAssignmentsByDay(selectedProject, allPeople).length === 0 && <div>无</div>}
+                {getAssignmentsByDay(selectedProject, allPeople).map(({ day, lines }) => (
+                  <div key={day} className="assignment-group">
+                    <div className="assignment-group-title">{day}</div>
+                    {lines.map((line) => (
+                      <div key={`${day}-${line}`} className="assignment-list-item">
+                        {line}
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
