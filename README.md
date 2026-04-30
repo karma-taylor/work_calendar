@@ -32,7 +32,18 @@ create table if not exists public.app_state (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.app_state_history (
+  id bigint generated always as identity primary key,
+  state_id text not null,
+  payload jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_app_state_history_state_created
+on public.app_state_history(state_id, created_at desc);
+
 alter table public.app_state enable row level security;
+alter table public.app_state_history enable row level security;
 
 create policy "allow anon read app_state"
 on public.app_state
@@ -52,6 +63,18 @@ for update
 to anon
 using (true)
 with check (true);
+
+create policy "allow anon read app_state_history"
+on public.app_state_history
+for select
+to anon
+using (true);
+
+create policy "allow anon insert app_state_history"
+on public.app_state_history
+for insert
+to anon
+with check (true);
 ```
 
 > 说明：这是最简免费方案，适合个人作品演示。正式商用建议加登录与更严格的 RLS 规则。
@@ -65,6 +88,7 @@ VITE_SUPABASE_URL=你的supabase项目url
 VITE_SUPABASE_ANON_KEY=你的anon公钥
 VITE_APP_WORKSPACE_ID=default
 VITE_SUPABASE_TABLE=app_state
+VITE_SUPABASE_HISTORY_TABLE=app_state_history
 ```
 
 Cloudflare Pages 部署时，在项目环境变量中配置同名变量。
