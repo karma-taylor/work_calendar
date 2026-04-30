@@ -293,7 +293,9 @@ function MultiPeoplePicker({ options, selectedIds, onChange, placeholder }) {
                 checked={selectedSet.has(person.id)}
                 onChange={() => toggleId(person.id)}
               />
-              {person.name}({person.sourceSheet})
+              <span className="people-picker-label">
+                {person.name}（{person.sourceSheet}）
+              </span>
             </label>
           ))}
         </div>
@@ -1094,14 +1096,13 @@ function App() {
             <fieldset>
               <div className="fieldset-head">
                 <legend>创建管理人员</legend>
-                <label className="inline-switch">
-                  <span>显示候选人</span>
-                  <input
-                    type="checkbox"
-                    checked={showManagerCandidates}
-                    onChange={(event) => setShowManagerCandidates(event.target.checked)}
-                  />
-                </label>
+                <button
+                  type="button"
+                  className="secondary-btn small"
+                  onClick={() => setShowManagerCandidates((prev) => !prev)}
+                >
+                  {showManagerCandidates ? '关闭二级菜单' : '打开二级菜单'}
+                </button>
               </div>
               <div className="selected-inline-tip">
                 已选管理人员：

@@ -427,7 +427,7 @@ fieldset {
   max-height: 220px;
   overflow: auto;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px 10px;
 }
 
@@ -441,6 +441,12 @@ fieldset {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.2;
+}
+
+.people-picker-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .people-picker-empty {
