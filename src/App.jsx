@@ -653,6 +653,10 @@ function App() {
     [days],
   )
   const allPeople = useMemo(() => [...managers, ...workers], [managers, workers])
+  const selectedProjectDayGroups = useMemo(
+    () => (selectedProject ? getAssignmentsByDay(selectedProject, allPeople) : []),
+    [selectedProject, allPeople],
+  )
 
   const addAssignmentRow = () => {
     setForm((prev) => ({
@@ -1553,7 +1557,7 @@ function App() {
               </button>
             </div>
             {editingProject && editForm ? (
-              <>
+              <section key="edit-mode" className="details-mode-body">
                 <label>
                   工单名称
                   <input
@@ -1669,44 +1673,44 @@ function App() {
                     + 添加分段安排
                   </button>
                 </fieldset>
-              </>
+              </section>
             ) : (
-              <>
-            <div className="detail-item">
-              <strong>工单名称:</strong> {selectedProject.name}
-            </div>
-            <div className="detail-item">
-              <strong>时间:</strong> {selectedProject.startDate} ~ {selectedProject.endDate}
-            </div>
-            <div className="detail-item">
-              <strong>管理人员:</strong>{' '}
-              {selectedProject.managerIds.length > 0
-                ? getDisplayName(managers, selectedProject.managerIds)
-                : '无'}
-            </div>
-            <div className="detail-item">
-              <strong>工人:</strong>{' '}
-              {selectedProject.workerIds.length > 0
-                ? getDisplayName(workers, selectedProject.workerIds)
-                : '无'}
-            </div>
-            <div className="detail-item">
-              <strong>分段安排（按日期分组）:</strong>
-              <div className="assignment-list">
-                {getAssignmentsByDay(selectedProject, allPeople).length === 0 && <div>无</div>}
-                {getAssignmentsByDay(selectedProject, allPeople).map(({ day, lines }) => (
-                  <div key={day} className="assignment-group">
-                    <div className="assignment-group-title">{day}</div>
-                    {lines.map((line) => (
-                      <div key={`${day}-${line}`} className="assignment-list-item">
-                        {line}
+              <section key="view-mode" className="details-mode-body">
+                <div className="detail-item">
+                  <strong>工单名称:</strong> {selectedProject.name}
+                </div>
+                <div className="detail-item">
+                  <strong>时间:</strong> {selectedProject.startDate} ~ {selectedProject.endDate}
+                </div>
+                <div className="detail-item">
+                  <strong>管理人员:</strong>{' '}
+                  {selectedProject.managerIds.length > 0
+                    ? getDisplayName(managers, selectedProject.managerIds)
+                    : '无'}
+                </div>
+                <div className="detail-item">
+                  <strong>工人:</strong>{' '}
+                  {selectedProject.workerIds.length > 0
+                    ? getDisplayName(workers, selectedProject.workerIds)
+                    : '无'}
+                </div>
+                <div className="detail-item">
+                  <strong>分段安排（按日期分组）:</strong>
+                  <div className="assignment-list">
+                    {selectedProjectDayGroups.length === 0 && <div>无</div>}
+                    {selectedProjectDayGroups.map(({ day, lines }) => (
+                      <div key={day} className="assignment-group">
+                        <div className="assignment-group-title">{day}</div>
+                        {lines.map((line) => (
+                          <div key={`${day}-${line}`} className="assignment-list-item">
+                            {line}
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
-                ))}
-              </div>
-            </div>
-              </>
+                </div>
+              </section>
             )}
             <div className="modal-actions">
               {deleteMode && (
@@ -1723,7 +1727,15 @@ function App() {
                   保存修改
                 </button>
               )}
-              <button className="create-btn" type="button" onClick={() => setSelectedProject(null)}>
+              <button
+                className="create-btn"
+                type="button"
+                onClick={() => {
+                  setEditingProject(false)
+                  setEditForm(null)
+                  setSelectedProject(null)
+                }}
+              >
                 关闭
               </button>
             </div>
