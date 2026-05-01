@@ -366,6 +366,8 @@ function App() {
   const [showModal, setShowModal] = useState(false)
   const [showManagerCandidates, setShowManagerCandidates] = useState(false)
   const [selectedProject, setSelectedProject] = useState(null)
+  const [editingProject, setEditingProject] = useState(false)
+  const [editForm, setEditForm] = useState(null)
   /** 开启后点击日历工单条可删除工单 */
   const [deleteMode, setDeleteMode] = useState(false)
   const [form, setForm] = useState({
@@ -726,6 +728,102 @@ function App() {
     })
   }
 
+  const buildEditFormFromProject = useCallback((project) => {
+    const assignments = getProjectAssignments(project)
+    const managerIds = Array.from(
+      new Set(
+        assignments
+          .filter((assignment) => assignment.role === 'manager')
+          .map((assignment) => assignment.personId),
+      ),
+    )
+    const workerRowsMap = new Map()
+    assignments
+      .filter((assignment) => assignment.role === 'worker')
+      .forEach((assignment) => {
+        const key = `${assignment.segmentStart}|${assignment.segmentEnd}|${assignment.trade || ''}|${assignment.note || ''}`
+        if (!workerRowsMap.has(key)) {
+          workerRowsMap.set(key, {
+            id: crypto.randomUUID(),
+            personIds: [],
+            trade: assignment.trade || '',
+            segmentStart: assignment.segmentStart,
+            segmentEnd: assignment.segmentEnd,
+            note: assignment.note || '',
+          })
+        }
+        workerRowsMap.get(key).personIds.push(assignment.personId)
+      })
+    return {
+      name: project.name,
+      startDate: project.startDate,
+      endDate: project.endDate,
+      managerIds,
+      assignments: Array.from(workerRowsMap.values()),
+    }
+  }, [])
+
+  const applyEditDateChange = (field, value) => {
+    setEditForm((prev) => {
+      if (!prev) {
+        return prev
+      }
+      const next = { ...prev, [field]: value }
+      next.assignments = prev.assignments.map((row) => {
+        let segmentStart = row.segmentStart
+        let segmentEnd = row.segmentEnd
+        if (segmentStart < next.startDate) {
+          segmentStart = next.startDate
+        }
+        if (segmentEnd > next.endDate) {
+          segmentEnd = next.endDate
+        }
+        if (segmentStart > segmentEnd) {
+          segmentEnd = segmentStart
+        }
+        return { ...row, segmentStart, segmentEnd }
+      })
+      return next
+    })
+  }
+
+  const updateEditAssignmentRow = (rowId, patch) => {
+    setEditForm((prev) => ({
+      ...prev,
+      assignments: prev.assignments.map((row) => (row.id === rowId ? { ...row, ...patch } : row)),
+    }))
+  }
+
+  const removeEditAssignmentRow = (rowId) => {
+    setEditForm((prev) => ({
+      ...prev,
+      assignments: prev.assignments.filter((row) => row.id !== rowId),
+    }))
+  }
+
+  const addEditAssignmentRow = () => {
+    setEditForm((prev) => ({
+      ...prev,
+      assignments: [...prev.assignments, createEmptyAssignment(prev.startDate, prev.endDate)],
+    }))
+  }
+
+  const duplicateEditAssignmentRow = (rowId) => {
+    setEditForm((prev) => {
+      const source = prev.assignments.find((row) => row.id === rowId)
+      if (!source) {
+        return prev
+      }
+      return {
+        ...prev,
+        assignments: [
+          ...prev.assignments,
+          { ...source, id: crypto.randomUUID(), personIds: [...(source.personIds || [])] },
+        ],
+      }
+    })
+  }
+
   const submitProject = (event) => {
     event.preventDefault()
     if (!form.name.trim()) {
@@ -1009,6 +1107,151 @@ function App() {
       return
     }
     setSelectedProject(project)
+    setEditingProject(false)
+    setEditForm(null)
+  }
+
+  const startEditProject = () => {
+    if (!selectedProject) {
+      return
+    }
+    setEditForm(buildEditFormFromProject(selectedProject))
+    setEditingProject(true)
+  }
+
+  const saveProjectEdit = () => {
+    if (!selectedProject || !editForm) {
+      return
+    }
+    if (!editForm.name.trim()) {
+      window.alert('请填写工单名称')
+      return
+    }
+    if (editForm.startDate > editForm.endDate) {
+      window.alert('结束日期不能早于开始日期')
+      return
+    }
+    if (editForm.managerIds.length === 0) {
+      window.alert('请至少选择一位管理人员')
+      return
+    }
+
+    const workerAssignments = editForm.assignments.flatMap((row) =>
+      (row.personIds || []).map((personId) => ({
+        id: crypto.randomUUID(),
+        personId,
+        role: 'worker',
+        trade: row.trade || '',
+        segmentStart: row.segmentStart,
+        segmentEnd: row.segmentEnd,
+        note: row.note || '',
+      })),
+    )
+    const managerAssignments = editForm.managerIds.map((personId) => ({
+      id: crypto.randomUUID(),
+      personId,
+      role: 'manager',
+      trade: '',
+      segmentStart: editForm.startDate,
+      segmentEnd: editForm.endDate,
+      note: '',
+    }))
+    const normalizedAssignments = [...managerAssignments, ...workerAssignments]
+    const invalidAssignment = normalizedAssignments.find((assignment) => {
+      if (!assignment.personId) {
+        return true
+      }
+      if (assignment.segmentStart > assignment.segmentEnd) {
+        return true
+      }
+      if (assignment.segmentStart < editForm.startDate || assignment.segmentEnd > editForm.endDate) {
+        return true
+      }
+      return false
+    })
+    if (invalidAssignment) {
+      window.alert('人员分段安排有误：请检查人员、时间区间，并确保在工单日期范围内。')
+      return
+    }
+
+    const peopleById = new Map([...managers, ...workers].map((person) => [person.id, person]))
+    const conflictHits = []
+    for (const existingProject of projects) {
+      if (existingProject.id === selectedProject.id) {
+        continue
+      }
+      const existingAssignments = getProjectAssignments(existingProject)
+      for (const currentAssignment of normalizedAssignments) {
+        const currentPerson = peopleById.get(currentAssignment.personId)
+        if (!currentPerson) {
+          continue
+        }
+        const currentPersonKey = personUniqueKey(currentPerson)
+        for (const existingAssignment of existingAssignments) {
+          const existingPerson = peopleById.get(existingAssignment.personId)
+          if (!existingPerson) {
+            continue
+          }
+          if (personUniqueKey(existingPerson) !== currentPersonKey) {
+            continue
+          }
+          if (
+            hasDateOverlap(
+              currentAssignment.segmentStart,
+              currentAssignment.segmentEnd,
+              existingAssignment.segmentStart,
+              existingAssignment.segmentEnd,
+            )
+          ) {
+            conflictHits.push({
+              personLabel: `${currentPerson.name}(${currentPerson.sourceSheet})`,
+              projectName: existingProject.name,
+            })
+          }
+        }
+      }
+    }
+    if (conflictHits.length > 0) {
+      const uniqueConflicts = Array.from(
+        new Set(conflictHits.map((hit) => `${hit.personLabel} -> ${hit.projectName}`)),
+      )
+      window.alert(
+        `人员冲突：\n${uniqueConflicts.join('\n')}\n\n同一人同一时间不能分配到两个工单。`,
+      )
+      return
+    }
+
+    const managerIds = Array.from(
+      new Set(
+        normalizedAssignments
+          .filter((assignment) => assignment.role === 'manager')
+          .map((assignment) => assignment.personId),
+      ),
+    )
+    const workerIds = Array.from(
+      new Set(
+        normalizedAssignments
+          .filter((assignment) => assignment.role === 'worker')
+          .map((assignment) => assignment.personId),
+      ),
+    )
+
+    const nextProject = {
+      ...selectedProject,
+      name: editForm.name,
+      startDate: editForm.startDate,
+      endDate: editForm.endDate,
+      managerIds,
+      workerIds,
+      assignments: normalizedAssignments,
+      managerEnabled: managerIds.length > 0,
+      workerEnabled: workerIds.length > 0,
+    }
+
+    setProjects((prev) => prev.map((project) => (project.id === selectedProject.id ? nextProject : project)))
+    setSelectedProject(nextProject)
+    setEditingProject(false)
+    setEditForm(null)
   }
 
   return (
@@ -1292,7 +1535,143 @@ function App() {
       {selectedProject && (
         <div className="modal-mask">
           <div className="project-modal details-modal">
-            <h2>项目详情</h2>
+            <div className="fieldset-head">
+              <h2>工单详情</h2>
+              <button
+                type="button"
+                className="secondary-btn small"
+                onClick={() => {
+                  if (editingProject) {
+                    setEditingProject(false)
+                    setEditForm(null)
+                  } else {
+                    startEditProject()
+                  }
+                }}
+              >
+                {editingProject ? '退出编辑' : '编辑'}
+              </button>
+            </div>
+            {editingProject && editForm ? (
+              <>
+                <label>
+                  工单名称
+                  <input
+                    value={editForm.name}
+                    onChange={(event) =>
+                      setEditForm((prev) => ({ ...prev, name: event.target.value }))
+                    }
+                  />
+                </label>
+                <div className="date-row">
+                  <label>
+                    开始日期
+                    <input
+                      type="date"
+                      value={editForm.startDate}
+                      onChange={(event) => applyEditDateChange('startDate', event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    结束日期
+                    <input
+                      type="date"
+                      value={editForm.endDate}
+                      onChange={(event) => applyEditDateChange('endDate', event.target.value)}
+                    />
+                  </label>
+                </div>
+                <fieldset>
+                  <legend>管理人员</legend>
+                  <div className="select-grid">
+                    {managers.length === 0 && <div>请先导入人员 Excel</div>}
+                    {managers.map((manager) => (
+                      <label key={manager.id}>
+                        <input
+                          type="checkbox"
+                          checked={editForm.managerIds.includes(manager.id)}
+                          onChange={() =>
+                            setEditForm((prev) => {
+                              const exists = prev.managerIds.includes(manager.id)
+                              return {
+                                ...prev,
+                                managerIds: exists
+                                  ? prev.managerIds.filter((item) => item !== manager.id)
+                                  : [...prev.managerIds, manager.id],
+                              }
+                            })
+                          }
+                        />
+                        {manager.name}({manager.sourceSheet})
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>工人分段安排</legend>
+                  <div className="assignment-rows">
+                    {editForm.assignments.length === 0 && (
+                      <div className="assignment-empty">暂未添加分段安排</div>
+                    )}
+                    {editForm.assignments.map((row) => (
+                      <div className="assignment-row" key={row.id}>
+                        <MultiPeoplePicker
+                          options={workers}
+                          selectedIds={row.personIds || []}
+                          onChange={(personIds) => updateEditAssignmentRow(row.id, { personIds })}
+                          placeholder="选择工人（可多选）"
+                        />
+                        <input
+                          value={row.trade || ''}
+                          onChange={(event) =>
+                            updateEditAssignmentRow(row.id, { trade: event.target.value })
+                          }
+                          placeholder="工种（如：电工）"
+                        />
+                        <input
+                          type="date"
+                          value={row.segmentStart}
+                          min={editForm.startDate}
+                          max={editForm.endDate}
+                          onChange={(event) =>
+                            updateEditAssignmentRow(row.id, { segmentStart: event.target.value })
+                          }
+                        />
+                        <input
+                          type="date"
+                          value={row.segmentEnd}
+                          min={editForm.startDate}
+                          max={editForm.endDate}
+                          onChange={(event) =>
+                            updateEditAssignmentRow(row.id, { segmentEnd: event.target.value })
+                          }
+                        />
+                        <div className="assignment-actions">
+                          <button
+                            type="button"
+                            className="secondary-btn small"
+                            onClick={() => duplicateEditAssignmentRow(row.id)}
+                          >
+                            复制
+                          </button>
+                          <button
+                            type="button"
+                            className="danger-btn small"
+                            onClick={() => removeEditAssignmentRow(row.id)}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button type="button" className="secondary-btn" onClick={addEditAssignmentRow}>
+                    + 添加分段安排
+                  </button>
+                </fieldset>
+              </>
+            ) : (
+              <>
             <div className="detail-item">
               <strong>工单名称:</strong> {selectedProject.name}
             </div>
@@ -1327,6 +1706,8 @@ function App() {
                 ))}
               </div>
             </div>
+              </>
+            )}
             <div className="modal-actions">
               {deleteMode && (
                 <button
@@ -1335,6 +1716,11 @@ function App() {
                   onClick={() => confirmDeleteProject(selectedProject)}
                 >
                   删除此工单
+                </button>
+              )}
+              {editingProject && (
+                <button className="create-btn" type="button" onClick={saveProjectEdit}>
+                  保存修改
                 </button>
               )}
               <button className="create-btn" type="button" onClick={() => setSelectedProject(null)}>
