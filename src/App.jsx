@@ -214,6 +214,29 @@ const createEmptyAssignment = (startDate, endDate) => ({
   note: '',
 })
 
+/** 工单块的柔和彩色调色板（半透明 ~15%） */
+const PROJECT_PALETTE = [
+  { bg: 'rgba(96, 165, 250, 0.15)', fg: '#1d4ed8', border: 'rgba(96, 165, 250, 0.45)' },
+  { bg: 'rgba(167, 139, 250, 0.15)', fg: '#5b21b6', border: 'rgba(167, 139, 250, 0.45)' },
+  { bg: 'rgba(94, 234, 212, 0.18)', fg: '#0f766e', border: 'rgba(94, 234, 212, 0.5)' },
+  { bg: 'rgba(244, 114, 182, 0.15)', fg: '#9d174d', border: 'rgba(244, 114, 182, 0.45)' },
+  { bg: 'rgba(251, 191, 36, 0.18)', fg: '#92400e', border: 'rgba(251, 191, 36, 0.5)' },
+  { bg: 'rgba(74, 222, 128, 0.18)', fg: '#15803d', border: 'rgba(74, 222, 128, 0.5)' },
+  { bg: 'rgba(248, 113, 113, 0.15)', fg: '#991b1b', border: 'rgba(248, 113, 113, 0.45)' },
+  { bg: 'rgba(56, 189, 248, 0.15)', fg: '#0369a1', border: 'rgba(56, 189, 248, 0.45)' },
+]
+
+const getProjectColor = (projectId) => {
+  if (!projectId) {
+    return PROJECT_PALETTE[0]
+  }
+  let hash = 0
+  for (let i = 0; i < projectId.length; i += 1) {
+    hash = (hash * 31 + projectId.charCodeAt(i)) >>> 0
+  }
+  return PROJECT_PALETTE[hash % PROJECT_PALETTE.length]
+}
+
 const getProjectAssignments = (project) => {
   if (Array.isArray(project.assignments) && project.assignments.length > 0) {
     return project.assignments
@@ -368,6 +391,8 @@ function App() {
   const [selectedProject, setSelectedProject] = useState(null)
   const [editingProject, setEditingProject] = useState(false)
   const [editForm, setEditForm] = useState(null)
+  /** 侧边栏的筛选关键字（按工单名/管理人员/工人/工种模糊匹配） */
+  const [filterKeyword, setFilterKeyword] = useState('')
   /** 开启后点击日历工单条可删除工单 */
   const [deleteMode, setDeleteMode] = useState(false)
   const [form, setForm] = useState({
@@ -972,10 +997,42 @@ function App() {
     setCurrentMonth(next.getMonth())
   }
 
+  const visibleProjects = useMemo(() => {
+    const q = filterKeyword.trim().toLowerCase()
+    if (!q) {
+      return projects
+    }
+    const peopleById = new Map([...managers, ...workers].map((person) => [person.id, person]))
+    return projects.filter((project) => {
+      if (project.name?.toLowerCase().includes(q)) {
+        return true
+      }
+      const rows = getProjectAssignments(project)
+      return rows.some((row) => {
+        const person = peopleById.get(row.personId)
+        const personLabel = person ? `${person.name}${person.sourceSheet}` : ''
+        return (
+          personLabel.toLowerCase().includes(q) ||
+          (row.trade || '').toLowerCase().includes(q)
+        )
+      })
+    })
+  }, [filterKeyword, projects, managers, workers])
+
+  const currentMonthProjectCount = useMemo(() => {
+    const monthStart = new Date(currentYear, currentMonth, 1)
+    const monthEnd = new Date(currentYear, currentMonth + 1, 0)
+    return projects.filter((project) => {
+      const start = toDayStart(project.startDate)
+      const end = toDayStart(project.endDate)
+      return start <= monthEnd && end >= monthStart
+    }).length
+  }, [projects, currentMonth, currentYear])
+
   const getWeekSegments = (week) => {
     const weekStart = toDayStart(week[0].date)
     const weekEnd = toDayStart(week[6].date)
-    const intersected = projects
+    const intersected = visibleProjects
       .filter((project) => {
         const projectStart = toDayStart(project.startDate)
         const projectEnd = toDayStart(project.endDate)
@@ -1259,8 +1316,64 @@ function App() {
   }
 
   return (
-    <main className="calendar-app">
-      <header className="app-header">
+    <div className="app-shell">
+      <aside className="app-sidebar">
+        <div className="sidebar-brand">
+          <span className="brand-dot" />
+          <span className="brand-name">工作日历</span>
+        </div>
+
+        <div className="sidebar-section">
+          <div className="sidebar-section-title">筛选</div>
+          <input
+            className="sidebar-search"
+            value={filterKeyword}
+            onChange={(event) => setFilterKeyword(event.target.value)}
+            placeholder="搜索工单/人员/工种"
+          />
+          {filterKeyword && (
+            <button
+              type="button"
+              className="secondary-btn small sidebar-clear"
+              onClick={() => setFilterKeyword('')}
+            >
+              清空筛选
+            </button>
+          )}
+        </div>
+
+        <div className="sidebar-section">
+          <div className="sidebar-section-title">云端同步</div>
+          <div className={`sync-pill ${isCloudEnabled() ? 'is-on' : 'is-off'}`}>
+            <span className="sync-dot" />
+            {isCloudEnabled() ? '已启用 Supabase' : '仅本地缓存'}
+          </div>
+          <div className="sidebar-hint">
+            {isCloudEnabled()
+              ? '工单与人员名单自动同步并保留快照'
+              : '配置 Supabase 后可实现跨设备同步'}
+          </div>
+        </div>
+
+        <div className="sidebar-section">
+          <div className="sidebar-section-title">概览</div>
+          <div className="sidebar-stat">
+            <span>全部工单</span>
+            <strong>{projects.length}</strong>
+          </div>
+          <div className="sidebar-stat">
+            <span>当月覆盖</span>
+            <strong>{currentMonthProjectCount}</strong>
+          </div>
+          <div className="sidebar-stat">
+            <span>筛选命中</span>
+            <strong>{visibleProjects.length}</strong>
+          </div>
+        </div>
+      </aside>
+
+      <main className="calendar-app">
+        <header className="app-header">
         <div className="month-switch">
           <button type="button" onClick={() => changeMonth(-1)}>
             上个月
@@ -1341,24 +1454,30 @@ function App() {
                 ))}
               </div>
               <div className="week-lines" style={{ height: `${laneCount * 28 + 4}px` }}>
-                {segments.map((segment) => (
-                  <button
-                    type="button"
-                    key={`${segment.project.id}-${weekIndex}`}
-                    className={`project-line ${segment.continuedFromPrev ? 'continued-left' : 'start'} ${segment.continuedToNext ? 'continued-right' : 'end'} ${deleteMode ? 'delete-mode' : ''}`}
-                    style={{
-                      left: `calc(${segment.startIndex} * (100% / 7) + 6px)`,
-                      width: `calc(${segment.span} * (100% / 7) - 12px)`,
-                      top: `${segment.lane * 28 + 2}px`,
-                    }}
-                    title={
-                      deleteMode ? `${segment.project.name}（点击删除）` : segment.project.name
-                    }
-                    onClick={() => handleProjectLineClick(segment.project)}
-                  >
-                    <span>{segment.project.name}</span>
-                  </button>
-                ))}
+                {segments.map((segment) => {
+                  const color = getProjectColor(segment.project.id)
+                  return (
+                    <button
+                      type="button"
+                      key={`${segment.project.id}-${weekIndex}`}
+                      className={`project-line ${segment.continuedFromPrev ? 'continued-left' : 'start'} ${segment.continuedToNext ? 'continued-right' : 'end'} ${deleteMode ? 'delete-mode' : ''}`}
+                      style={{
+                        left: `calc(${segment.startIndex} * (100% / 7) + 6px)`,
+                        width: `calc(${segment.span} * (100% / 7) - 12px)`,
+                        top: `${segment.lane * 28 + 2}px`,
+                        '--block-bg': color.bg,
+                        '--block-fg': color.fg,
+                        '--block-border': color.border,
+                      }}
+                      title={
+                        deleteMode ? `${segment.project.name}（点击删除）` : segment.project.name
+                      }
+                      onClick={() => handleProjectLineClick(segment.project)}
+                    >
+                      <span>{segment.project.name}</span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )
@@ -1742,7 +1861,8 @@ function App() {
           </div>
         </div>
       )}
-    </main>
+      </main>
+    </div>
   )
 }
 
