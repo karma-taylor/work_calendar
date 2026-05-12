@@ -1,6 +1,15 @@
-body {
+html,
+body,
+#root {
   margin: 0;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  color: #14213d;
-  background: #eef3ff;
+  height: 100%;
+}
+
+body {
+  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Tahoma,
+    Geneva, Verdana, sans-serif;
+  background: #0f111a;
+  color: #ffffff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
