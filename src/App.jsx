@@ -1532,34 +1532,43 @@ function App() {
               </div>
               <div className="selected-inline-tip">
                 已选管理人员：
-                {form.managerIds.length > 0 ? getDisplayName(managers, form.managerIds) : '未选择'}
+                {form.managerIds.length === 0
+                  ? '未选择'
+                  : getDisplayName(managers, form.managerIds) || `已选 ${form.managerIds.length} 人`}
               </div>
               {showManagerCandidates && (
                 <div className="manager-candidate-wrap">
                   <div className="select-grid">
                     {managers.length === 0 && <div>请先导入人员 Excel</div>}
-                    {managers.map((manager) => (
-                      <label key={manager.id}>
-                        <input
-                          type="checkbox"
-                          checked={form.managerIds.includes(manager.id)}
-                          onChange={() =>
-                            setForm((prev) => {
-                              const exists = prev.managerIds.includes(manager.id)
-                              return {
+                    {managers.map((manager) => {
+                      const isChecked = form.managerIds.includes(manager.id)
+                      return (
+                        <div key={manager.id} className="manager-check-item">
+                          <input
+                            type="checkbox"
+                            id={`mgr-cb-${manager.id}`}
+                            checked={isChecked}
+                            onChange={(e) => {
+                              const checked = e.target.checked
+                              setForm((prev) => ({
                                 ...prev,
-                                managerIds: exists
-                                  ? prev.managerIds.filter((item) => item !== manager.id)
-                                  : [...prev.managerIds, manager.id],
-                              }
-                            })
-                          }
-                        />
-                        {manager.name}({manager.sourceSheet})
-                      </label>
-                    ))}
+                                managerIds: checked
+                                  ? [...prev.managerIds, manager.id]
+                                  : prev.managerIds.filter((item) => item !== manager.id),
+                              }))
+                            }}
+                          />
+                          <label htmlFor={`mgr-cb-${manager.id}`}>
+                            {manager.name}({manager.sourceSheet})
+                          </label>
+                        </div>
+                      )
+                    })}
                   </div>
                   <div className="manager-candidate-actions">
+                    <span className="manager-selected-count">
+                      {form.managerIds.length > 0 ? `已选 ${form.managerIds.length} 人` : '未选择'}
+                    </span>
                     <button
                       type="button"
                       className="create-btn"
@@ -1709,24 +1718,25 @@ function App() {
                   <div className="select-grid">
                     {managers.length === 0 && <div>请先导入人员 Excel</div>}
                     {managers.map((manager) => (
-                      <label key={manager.id}>
+                      <div key={manager.id} className="manager-check-item">
                         <input
                           type="checkbox"
+                          id={`edit-mgr-cb-${manager.id}`}
                           checked={editForm.managerIds.includes(manager.id)}
-                          onChange={() =>
-                            setEditForm((prev) => {
-                              const exists = prev.managerIds.includes(manager.id)
-                              return {
-                                ...prev,
-                                managerIds: exists
-                                  ? prev.managerIds.filter((item) => item !== manager.id)
-                                  : [...prev.managerIds, manager.id],
-                              }
-                            })
-                          }
+                          onChange={(e) => {
+                            const checked = e.target.checked
+                            setEditForm((prev) => ({
+                              ...prev,
+                              managerIds: checked
+                                ? [...prev.managerIds, manager.id]
+                                : prev.managerIds.filter((item) => item !== manager.id),
+                            }))
+                          }}
                         />
-                        {manager.name}({manager.sourceSheet})
-                      </label>
+                        <label htmlFor={`edit-mgr-cb-${manager.id}`}>
+                          {manager.name}({manager.sourceSheet})
+                        </label>
+                      </div>
                     ))}
                   </div>
                 </fieldset>
