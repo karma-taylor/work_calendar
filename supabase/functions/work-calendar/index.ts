@@ -1,71 +1,119 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-const corsHeaders = { 'Access-Control-Allow-Origin': Deno.env.get('WORK_CALENDAR_ALLOWED_ORIGIN') || '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-work-calendar-key', 'Access-Control-Allow-Methods': 'POST, OPTIONS' }
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
-const estimateTokens = (value: unknown) => Math.ceil(JSON.stringify(value).length / 4)
-const stateId = (workspaceId: string, name: string) => `${workspaceId}:${name}`
+type Role = 'viewer' | 'scheduler' | 'roster_admin'
+type Principal = { channel: 'web' | 'skill' | 'system'; role: Role; userId?: string; keyId?: string }
+const allowedOrigins = (Deno.env.get('WORK_CALENDAR_ALLOWED_ORIGIN') || '').split(',').map((value) => value.trim()).filter(Boolean)
+const workspaceId = Deno.env.get('WORK_CALENDAR_WORKSPACE_ID') || 'default'
+const maxBodyBytes = 64 * 1024, maxProjects = 200, maxAssignments = 100
+const datePattern = /^\d{4}-\d{2}-\d{2}$/, idPattern = /^[A-Za-z0-9_-]{1,96}$/, staffIdPattern = /^staff-[A-Za-z0-9_-]{1,64}$/, aliasPattern = /^[\u3400-\u9fff]{2,4}$/u
+const knownSources = new Set(['江都', '省建', '科林', 'CSI'])
+const rank: Record<Role, number> = { viewer: 0, scheduler: 1, roster_admin: 2 }
+const asObject = (value: unknown): value is Record<string, any> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+const exactKeys = (value: unknown, keys: string[]) => asObject(value) && Object.keys(value).every((key) => keys.includes(key))
+const validDate = (value: unknown) => typeof value === 'string' && datePattern.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`))
 const overlap = (aStart: string, aEnd: string, bStart: string, bEnd: string) => aStart <= bEnd && bStart <= aEnd
-const assignments = (project: any) => Array.isArray(project?.assignments) ? project.assignments : []
-function validateProjects(projects: any[], staff: any) {
-  const people = new Map([...(staff?.managers || []), ...(staff?.workers || [])].map((p: any) => [p.id, p]))
-  const conflicts: { person: string; project: string; otherProject: string }[] = []
+const can = (principal: Principal, required: Role) => rank[principal.role] >= rank[required]
+const estimateTokens = (value: unknown) => Math.ceil(JSON.stringify(value).length / 4)
+const cors = (origin: string | null) => origin && allowedOrigins.includes(origin) ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin', 'Access-Control-Allow-Headers': 'authorization, content-type, x-work-calendar-key, x-work-calendar-key-id', 'Access-Control-Allow-Methods': 'POST, OPTIONS' } : {}
+const reply = (body: unknown, status = 200, origin: string | null = null) => new Response(JSON.stringify(body), { status, headers: { ...cors(origin), 'Content-Type': 'application/json' } })
+async function sha256(value: string) { const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)); return Array.from(new Uint8Array(bytes)).map((part) => part.toString(16).padStart(2, '0')).join('') }
+
+function validateProjects(projects: unknown, staff: any) {
+  if (!Array.isArray(projects) || projects.length > maxProjects) throw new Error('INVALID_PROJECTS')
+  const people = new Map<string, Role>()
+  for (const person of staff?.managers || []) people.set(person.id, 'viewer')
+  for (const person of staff?.workers || []) people.set(person.id, 'scheduler')
+  const projectIds = new Set<string>(), assignmentIds = new Set<string>(), byPerson = new Map<string, any[]>()
   for (const project of projects) {
-    if (!project?.name || !project?.startDate || !project?.endDate || project.startDate > project.endDate) return { valid: false, code: 'INVALID_PROJECT', conflicts }
-    for (const row of assignments(project)) if (!people.has(row.personId) || !row.segmentStart || !row.segmentEnd || row.segmentStart > row.segmentEnd || row.segmentStart < project.startDate || row.segmentEnd > project.endDate) return { valid: false, code: 'INVALID_ASSIGNMENT', conflicts }
+    const allowed = ['id', 'name', 'startDate', 'endDate', 'assignments', 'managerIds', 'workerIds', 'managerEnabled', 'workerEnabled']
+    if (!exactKeys(project, allowed) || typeof project.id !== 'string' || !idPattern.test(project.id) || projectIds.has(project.id) || typeof project.name !== 'string' || !project.name.trim() || project.name.length > 120 || !validDate(project.startDate) || !validDate(project.endDate) || project.startDate > project.endDate || !Array.isArray(project.assignments) || project.assignments.length > maxAssignments) throw new Error('INVALID_PROJECT')
+    projectIds.add(project.id)
+    for (const assignment of project.assignments) {
+      const keys = ['id', 'personId', 'role', 'trade', 'segmentStart', 'segmentEnd', 'note']
+      if (!exactKeys(assignment, keys) || typeof assignment.id !== 'string' || !idPattern.test(assignment.id) || assignmentIds.has(assignment.id) || typeof assignment.personId !== 'string' || !staffIdPattern.test(assignment.personId) || (assignment.role !== 'manager' && assignment.role !== 'worker') || (assignment.role === 'manager' && people.get(assignment.personId) !== 'viewer') || (assignment.role === 'worker' && people.get(assignment.personId) !== 'scheduler') || typeof assignment.trade !== 'string' || assignment.trade.length > 64 || typeof assignment.note !== 'string' || assignment.note.length > 500 || !validDate(assignment.segmentStart) || !validDate(assignment.segmentEnd) || assignment.segmentStart > assignment.segmentEnd || assignment.segmentStart < project.startDate || assignment.segmentEnd > project.endDate) throw new Error('INVALID_ASSIGNMENT')
+      assignmentIds.add(assignment.id); byPerson.set(assignment.personId, [...(byPerson.get(assignment.personId) || []), { project, assignment }])
+    }
   }
-  for (let i = 0; i < projects.length; i += 1) for (let j = i + 1; j < projects.length; j += 1) for (const left of assignments(projects[i])) for (const right of assignments(projects[j])) if (left.personId === right.personId && overlap(left.segmentStart, left.segmentEnd, right.segmentStart, right.segmentEnd)) { const person = people.get(left.personId); conflicts.push({ person: `${person.name}(${person.sourceSheet})`, project: projects[i].name, otherProject: projects[j].name }) }
-  return { valid: conflicts.length === 0, code: conflicts.length ? 'SCHEDULING_CONFLICT' : null, conflicts }
+  for (const [personId, entries] of byPerson) {
+    entries.sort((a, b) => a.assignment.segmentStart.localeCompare(b.assignment.segmentStart) || a.assignment.segmentEnd.localeCompare(b.assignment.segmentEnd))
+    for (let index = 1; index < entries.length; index += 1) if (overlap(entries[index - 1].assignment.segmentStart, entries[index - 1].assignment.segmentEnd, entries[index].assignment.segmentStart, entries[index].assignment.segmentEnd)) throw new Error(`SCHEDULING_CONFLICT:${personId}`)
+  }
+  return projects
+}
+
+function validateStaff(staff: unknown, existing: any) {
+  if (!exactKeys(staff, ['managers', 'workers']) || !asObject(staff) || !Array.isArray(staff.managers) || !Array.isArray(staff.workers) || staff.managers.length + staff.workers.length > 1000) throw new Error('INVALID_STAFF')
+  const oldRoles = new Map<string, 'manager' | 'worker'>(); for (const person of existing?.managers || []) oldRoles.set(person.id, 'manager'); for (const person of existing?.workers || []) oldRoles.set(person.id, 'worker')
+  const ids = new Set<string>()
+  for (const [role, group] of [['manager', staff.managers], ['worker', staff.workers]] as const) for (const person of group) {
+    if (!exactKeys(person, ['id', 'name', 'title', 'tradeTag', 'sourceSheet']) || !asObject(person) || typeof person.id !== 'string' || !staffIdPattern.test(person.id) || ids.has(person.id) || typeof person.name !== 'string' || !aliasPattern.test(person.name) || typeof person.title !== 'string' || person.title.length > 64 || typeof person.tradeTag !== 'string' || !person.tradeTag.trim() || person.tradeTag.length > 64 || typeof person.sourceSheet !== 'string' || !knownSources.has(person.sourceSheet) || (role === 'worker' && person.sourceSheet === 'CSI') || (oldRoles.has(person.id) && oldRoles.get(person.id) !== role)) throw new Error('INVALID_STAFF_MEMBER')
+    ids.add(person.id)
+  }
+  return staff
+}
+
+function candidate(operation: string, body: Record<string, any>, existing: any[]) {
+  if (operation === 'create_project') { if (!asObject(body.project) || existing.some((project) => project.id === body.project.id)) throw new Error('INVALID_CREATE'); return [...existing, body.project] }
+  if (operation === 'update_project') { if (!asObject(body.project) || !existing.some((project) => project.id === body.project.id)) throw new Error('PROJECT_NOT_FOUND'); return existing.map((project) => project.id === body.project.id ? body.project : project) }
+  if (operation === 'delete_projects') { if (!Array.isArray(body.deleteProjectIds) || !body.deleteProjectIds.length || !body.deleteProjectIds.every((id: unknown) => typeof id === 'string' && idPattern.test(id))) throw new Error('INVALID_DELETE_REQUEST'); const ids = new Set(body.deleteProjectIds); if (ids.size !== body.deleteProjectIds.length || [...ids].some((id) => !existing.some((project) => project.id === id))) throw new Error('PROJECT_NOT_FOUND'); return existing.filter((project) => !ids.has(project.id)) }
+  throw new Error('INVALID_MUTATION')
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
-  const started = performance.now(); const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
-  let body: any = {}; let actorChannel = 'web'; let operation = 'unknown'; let workspaceId: string | null = null
-  const log = async (success: boolean, errorCode?: string, extra: Record<string, unknown> = {}) => { await admin.from('work_calendar_events').insert({ actor_channel: actorChannel, operation, success, error_code: errorCode || null, workspace_id: workspaceId, duration_ms: Math.round(performance.now() - started), ...extra }) }
+  const origin = req.headers.get('origin')
+  if (!allowedOrigins.length) return reply({ error: 'SERVER_MISCONFIGURED' }, 500, origin)
+  if (origin && !cors(origin)) return reply({ error: 'ORIGIN_NOT_ALLOWED' }, 403, origin)
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors(origin) })
+  if (req.method !== 'POST') return reply({ error: 'METHOD_NOT_ALLOWED' }, 405, origin)
+  if (Number(req.headers.get('content-length') || '0') > maxBodyBytes) return reply({ error: 'PAYLOAD_TOO_LARGE' }, 413, origin)
+  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+  const requestId = crypto.randomUUID(), started = performance.now(); let operation = 'unknown'; let principal: Principal = { channel: 'system', role: 'viewer' }
+  const audit = async (success: boolean, errorCode?: string, extra: Record<string, unknown> = {}) => admin.from('work_calendar_events').insert({ actor_channel: principal.channel, actor_user_id: principal.userId || null, actor_key_id: principal.keyId || null, actor_role: principal.role, request_id: requestId, operation, success, error_code: errorCode || null, workspace_id: workspaceId, duration_ms: Math.round(performance.now() - started), ...extra })
   try {
-    body = await req.json(); operation = body.action; workspaceId = body.workspaceId || 'default'
-    const suppliedKey = req.headers.get('x-work-calendar-key')
-    if (suppliedKey && suppliedKey === Deno.env.get('WORK_CALENDAR_API_KEY')) actorChannel = 'skill'
-    else {
-      const token = req.headers.get('authorization')?.replace(/^Bearer\s+/i, ''); if (!token) { await log(false, 'MISSING_CREDENTIALS'); return json({ error: 'UNAUTHORIZED' }, 401) }
-      const { data: userData } = await admin.auth.getUser(token); const email = userData.user?.email?.toLowerCase()
-      if (!email) { await log(false, 'INVALID_JWT'); return json({ error: 'UNAUTHORIZED' }, 401) }
-      const { data: member } = await admin.from('work_calendar_members').select('email').eq('email', email).maybeSingle()
-      if (!member) { await log(false, 'NOT_ALLOWLISTED'); return json({ error: 'FORBIDDEN' }, 403) }
+    const raw = await req.text(); if (raw.length > maxBodyBytes) return reply({ error: 'PAYLOAD_TOO_LARGE' }, 413, origin)
+    const body: unknown = JSON.parse(raw); if (!asObject(body) || typeof body.action !== 'string') return reply({ error: 'INVALID_PAYLOAD' }, 400, origin); operation = body.action
+    if (operation === 'request_login') {
+      const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '', ip = req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for') || 'unknown'
+      const [{ data: emailAllowed }, { data: ipAllowed }, { data: member }] = await Promise.all([admin.rpc('consume_work_calendar_login_rate', { p_bucket: await sha256(`email:${email}`) }), admin.rpc('consume_work_calendar_login_rate', { p_bucket: await sha256(`ip:${ip}`) }), email ? admin.from('work_calendar_members').select('email').eq('email', email).eq('is_active', true).maybeSingle() : Promise.resolve({ data: null })])
+      const shouldSend = Boolean(emailAllowed && ipAllowed && member)
+      await audit(shouldSend, emailAllowed && ipAllowed ? 'LOGIN_NOT_ALLOWED' : 'LOGIN_RATE_LIMITED'); return reply({ ok: true, shouldSend }, 200, origin)
     }
-    const getState = async (name: string) => {
-      const { data, error } = await admin.rpc('read_work_calendar_state', { p_workspace_id: workspaceId, p_state_name: name }).maybeSingle()
-      if (error) throw error
-      return data ? { payload: data.payload, updated_at: data.revision } : null
+    const key = req.headers.get('x-work-calendar-key'), keyId = req.headers.get('x-work-calendar-key-id')
+    if (key && keyId) {
+      const { data: apiKey } = await admin.from('work_calendar_api_keys').select('key_id,key_hash,role,is_active,expires_at').eq('key_id', keyId).maybeSingle()
+      if (!apiKey || !apiKey.is_active || (apiKey.expires_at && new Date(apiKey.expires_at) <= new Date()) || apiKey.key_hash !== await sha256(key)) { await audit(false, 'INVALID_API_KEY'); return reply({ error: 'UNAUTHORIZED' }, 401, origin) }
+      principal = { channel: 'skill', role: apiKey.role as Role, keyId: apiKey.key_id }
+    } else {
+      const token = req.headers.get('authorization')?.replace(/^Bearer\s+/i, ''), { data: userData } = token ? await admin.auth.getUser(token) : { data: { user: null } }; const user = userData.user, email = user?.email?.toLowerCase()
+      if (!user || !email) { await audit(false, 'INVALID_JWT'); return reply({ error: 'UNAUTHORIZED' }, 401, origin) }
+      const { data: member } = await admin.from('work_calendar_members').select('user_id,role,is_active,revoked_at').eq('email', email).maybeSingle()
+      if (!member || !member.is_active || member.revoked_at || (member.user_id && member.user_id !== user.id)) { await audit(false, 'NOT_ALLOWLISTED'); return reply({ error: 'FORBIDDEN' }, 403, origin) }
+      if (!member.user_id) await admin.from('work_calendar_members').update({ user_id: user.id }).eq('email', email).is('user_id', null)
+      principal = { channel: 'web', role: member.role as Role, userId: user.id }
     }
+    const getState = async (name: 'projects' | 'staff') => { const { data, error } = await admin.rpc('read_work_calendar_state', { p_workspace_id: workspaceId, p_state_name: name }).maybeSingle(); if (error) throw error; return data ? { payload: data.payload, revision: data.revision } : { payload: name === 'projects' ? [] : { managers: [], workers: [] }, revision: null } }
+    const writeState = (name: 'projects' | 'staff', payload: unknown, revision: unknown, history: boolean) => admin.rpc('apply_work_calendar_state', { p_workspace_id: workspaceId, p_state_name: name, p_expected_revision: typeof revision === 'string' ? revision : null, p_payload: payload, p_record_history: history })
     if (operation === 'read') {
-      const [projects, staff] = await Promise.all([getState('projects'), getState('staff')]); let visibleProjects = projects?.payload || []; const scope = body.scope || {}
-      if (!scope.full) {
-        visibleProjects = visibleProjects.filter((project: any) => (!scope.projectId || project.id === scope.projectId) && (!scope.personId || assignments(project).some((row: any) => row.personId === scope.personId)) && (!scope.start || !scope.end || overlap(project.startDate, project.endDate, scope.start, scope.end)))
-      }
-      let truncated = false
-      if (!scope.full && estimateTokens({ projects: visibleProjects, staff: staff?.payload || {} }) > 2000) { visibleProjects = visibleProjects.slice(0, scope.limit || 25); truncated = true }
-      const result = { projects: visibleProjects, staff: staff?.payload || { managers: [], workers: [] }, revision: projects?.updated_at || null, staffRevision: staff?.updated_at || null, truncated }
-      await log(true, undefined, { revision: projects?.updated_at || null, query_scope: scope, returned_records: result.projects.length, payload_token_estimate: estimateTokens(result) }); return json(result)
+      const [projects, staff] = await Promise.all([getState('projects'), getState('staff')]); const scope = asObject(body.scope) ? body.scope : {}; const visible = (projects.payload as any[]).filter((project) => (!scope.projectId || project.id === scope.projectId) && (!scope.start || !scope.end || overlap(project.startDate, project.endDate, String(scope.start), String(scope.end)))).slice(0, 200); const simplify = (group: any[]) => group.map(({ id, name, sourceSheet, tradeTag }) => ({ id, name, sourceSheet, tradeTag }))
+      const result = { projects: visible, staff: { managers: simplify((staff.payload as any).managers || []), workers: simplify((staff.payload as any).workers || []) }, revision: projects.revision, staffRevision: staff.revision, capabilities: { role: principal.role, canSchedule: can(principal, 'scheduler'), canManageRoster: can(principal, 'roster_admin'), canViewMetrics: can(principal, 'roster_admin') } }
+      await audit(true, undefined, { revision: projects.revision, query_scope: scope, returned_records: visible.length, payload_token_estimate: estimateTokens(result) }); return reply(result, 200, origin)
     }
-    if (operation === 'preview' || operation === 'apply') {
-      if (!Array.isArray(body.projects)) { await log(false, 'INVALID_PAYLOAD'); return json({ error: 'INVALID_PAYLOAD' }, 400) }
-      const [staff, existing] = await Promise.all([getState('staff'), getState('projects')]); const validation = validateProjects(body.projects, staff?.payload)
-      if (operation === 'preview' || !validation.valid) { await log(validation.valid, validation.code || undefined, { query_scope: body.scope || {}, returned_records: body.projects.length, payload_token_estimate: estimateTokens(validation) }); return json(validation, validation.valid ? 200 : 422) }
-      const { data: applied, error } = await admin.rpc('apply_work_calendar_state', { p_workspace_id: workspaceId, p_state_name: 'projects', p_expected_revision: body.expectedRevision || null, p_payload: body.projects, p_record_history: true }).single()
-      if (error) throw error
-      if (applied.status === 'REVISION_MISMATCH') { await log(false, 'REVISION_MISMATCH', { revision: applied.revision }); return json({ error: 'REVISION_MISMATCH', revision: applied.revision }, 409) }
-      const existingIds = new Set((existing?.payload || []).map((project: any) => project.id)); const createdProjectCount = body.projects.filter((project: any) => !existingIds.has(project.id)).length
-      await log(true, undefined, { revision: applied.revision, returned_records: body.projects.length, payload_token_estimate: estimateTokens(body.projects), created_project_count: createdProjectCount }); return json({ ok: true, revision: applied.revision })
+    if (operation === 'preview' || operation === 'create_project' || operation === 'update_project' || operation === 'delete_projects') {
+      if (!can(principal, 'scheduler')) { await audit(false, 'FORBIDDEN'); return reply({ error: 'FORBIDDEN' }, 403, origin) }
+      const [projects, staff] = await Promise.all([getState('projects'), getState('staff')]); const command = operation === 'preview' ? String(body.mutation || '') : operation; const next = validateProjects(candidate(command, body, projects.payload as any[]), staff.payload)
+      if (operation === 'preview') { await audit(true, undefined, { returned_records: next.length, payload_token_estimate: estimateTokens(next) }); return reply({ ok: true }, 200, origin) }
+      const { data: applied, error } = await writeState('projects', next, body.expectedRevision, true); if (error) throw error; if (applied.status === 'REVISION_MISMATCH') { await audit(false, 'REVISION_MISMATCH', { revision: applied.revision }); return reply({ error: 'REVISION_MISMATCH', revision: applied.revision }, 409, origin) }
+      await audit(true, undefined, { revision: applied.revision, returned_records: next.length, payload_token_estimate: estimateTokens(next), created_project_count: operation === 'create_project' ? 1 : 0, change_summary: { operation, project_ids: operation === 'delete_projects' ? body.deleteProjectIds : [body.project.id] } }); return reply({ ok: true, revision: applied.revision }, 200, origin)
     }
     if (operation === 'apply_staff') {
-      if (!body.staff || !Array.isArray(body.staff.managers) || !Array.isArray(body.staff.workers)) { await log(false, 'INVALID_PAYLOAD'); return json({ error: 'INVALID_PAYLOAD' }, 400) }
-      const { data: applied, error } = await admin.rpc('apply_work_calendar_state', { p_workspace_id: workspaceId, p_state_name: 'staff', p_expected_revision: body.expectedRevision || null, p_payload: body.staff, p_record_history: false }).single()
-      if (error) throw error
-      if (applied.status === 'REVISION_MISMATCH') { await log(false, 'REVISION_MISMATCH', { revision: applied.revision }); return json({ error: 'REVISION_MISMATCH', revision: applied.revision }, 409) }
-      await log(true, undefined, { revision: applied.revision, returned_records: body.staff.managers.length + body.staff.workers.length }); return json({ ok: true, revision: applied.revision })
+      if (!can(principal, 'roster_admin')) { await audit(false, 'FORBIDDEN'); return reply({ error: 'FORBIDDEN' }, 403, origin) }
+      const existing = await getState('staff'), next = validateStaff(body.staff, existing.payload); const { data: applied, error } = await writeState('staff', next, body.expectedRevision, false); if (error) throw error; if (applied.status === 'REVISION_MISMATCH') { await audit(false, 'REVISION_MISMATCH', { revision: applied.revision }); return reply({ error: 'REVISION_MISMATCH', revision: applied.revision }, 409, origin) }
+      await audit(true, undefined, { revision: applied.revision, returned_records: next.managers.length + next.workers.length, change_summary: { managers: next.managers.length, workers: next.workers.length } }); return reply({ ok: true, revision: applied.revision }, 200, origin)
     }
-    if (operation === 'metrics') { const { data, error } = await admin.from('work_calendar_events').select('actor_channel, operation, success, error_code, duration_ms, payload_token_estimate, created_project_count, created_at').gte('created_at', body.since || new Date(Date.now() - 30 * 86400000).toISOString()); if (error) throw error; await log(true); return json({ events: data }) }
-    await log(false, 'UNKNOWN_ACTION'); return json({ error: 'UNKNOWN_ACTION' }, 400)
-  } catch (error) { console.error(error); await log(false, 'INTERNAL_ERROR'); return json({ error: 'INTERNAL_ERROR' }, 500) }
+    if (operation === 'metrics') {
+      if (!can(principal, 'roster_admin')) { await audit(false, 'FORBIDDEN'); return reply({ error: 'FORBIDDEN' }, 403, origin) }
+      const since = typeof body.since === 'string' && new Date(body.since) > new Date(Date.now() - 90 * 86400000) ? body.since : new Date(Date.now() - 30 * 86400000).toISOString(); const { data, error } = await admin.from('work_calendar_events').select('actor_channel,actor_role,operation,success,error_code,duration_ms,payload_token_estimate,created_project_count,created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(1000); if (error) throw error; await audit(true); return reply({ events: data || [] }, 200, origin)
+    }
+    await audit(false, 'UNKNOWN_ACTION'); return reply({ error: 'UNKNOWN_ACTION' }, 400, origin)
+  } catch (error) { const code = error instanceof Error && /^[A-Z_]+(?::[A-Za-z0-9_-]+)?$/.test(error.message) ? error.message.split(':')[0] : 'INTERNAL_ERROR'; await audit(false, code); return reply({ error: code }, code === 'SCHEDULING_CONFLICT' ? 422 : 400, origin) }
 })

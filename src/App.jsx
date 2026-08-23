@@ -5,8 +5,10 @@ import {
   loadProjectsFromCloud,
   loadProjectsSnapshotFromCloud,
   loadStaffFromCloud,
-  saveProjectsToCloud,
   saveStaffToCloud,
+  createProjectInCloud,
+  updateProjectInCloud,
+  deleteProjectsInCloud,
 } from './lib/cloudStore'
 
 const TARGET_SHEETS = new Set(['江都', '省建', '科林'])
@@ -431,6 +433,12 @@ function App() {
     }))
   }, [])
 
+  const persistStaffImport = async (result) => {
+    if (isCloudEnabled()) {
+      await saveStaffToCloud(result)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -492,11 +500,6 @@ function App() {
     } catch (error) {
       console.error('保存项目缓存失败', error)
     }
-    if (isCloudEnabled()) {
-      void saveProjectsToCloud(projects).catch((error) => {
-        console.error('保存云端工单失败', error)
-      })
-    }
   }, [projects, projectsHydrated])
 
   /** 人员名单持久化：刷新即可恢复，不依赖文件系统 API 权限 */
@@ -518,16 +521,6 @@ function App() {
         )
       }
       console.error('保存人员名单缓存失败', error)
-    }
-    if (isCloudEnabled()) {
-      void saveStaffToCloud({
-        managers,
-        workers,
-        staffFileName,
-        lockIntent: staffFileLocked,
-      }).catch((error) => {
-        console.error('保存云端人员名单失败', error)
-      })
     }
   }, [managers, workers, staffFileName, staffFileLocked])
 
@@ -639,6 +632,7 @@ function App() {
         staffLastModifiedRef.current = file.lastModified
         const buffer = await file.arrayBuffer()
         const result = await parseStaffBuffer(buffer)
+        await persistStaffImport(result)
         requestAnimationFrame(() => {
           startTransition(() => {
             applyStaffResult(result, file.name)
@@ -856,7 +850,7 @@ function App() {
     })
   }
 
-  const submitProject = (event) => {
+  const submitProject = async (event) => {
     event.preventDefault()
     if (!form.name.trim()) {
       window.alert('请填写工单名称')
@@ -979,19 +973,24 @@ function App() {
       ),
     )
 
-    setProjects((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        ...form,
-        assignments: normalizedAssignments,
-        managerIds,
-        workerIds,
-        managerEnabled: managerIds.length > 0,
-        workerEnabled: workerIds.length > 0,
-      },
-    ])
-    closeModal()
+    const nextProject = {
+      id: crypto.randomUUID(),
+      name: form.name.trim(),
+      startDate: form.startDate,
+      endDate: form.endDate,
+      assignments: normalizedAssignments,
+      managerIds,
+      workerIds,
+      managerEnabled: managerIds.length > 0,
+      workerEnabled: workerIds.length > 0,
+    }
+    try {
+      if (isCloudEnabled()) await createProjectInCloud(nextProject)
+      setProjects((prev) => [...prev, nextProject])
+      closeModal()
+    } catch (error) {
+      window.alert(error?.code === 'REVISION_MISMATCH' ? '数据已被其他端更新，请刷新后重新创建。' : `创建工单失败：${error?.message || error}`)
+    }
   }
 
   const changeMonth = (offset) => {
@@ -1092,6 +1091,7 @@ function App() {
       const file = await handle.getFile()
       const buffer = await file.arrayBuffer()
       const result = await parseStaffBuffer(buffer)
+      await persistStaffImport(result)
       await idbSetStaffHandle(handle)
       staffHandleRef.current = handle
       staffLastModifiedRef.current = file.lastModified
@@ -1135,6 +1135,7 @@ function App() {
     try {
       const buffer = await readFileWithProgress(file)
       const result = await parseStaffBuffer(buffer)
+      await persistStaffImport(result)
       requestAnimationFrame(() => {
         startTransition(() => {
           setStaffFileLocked(false)
@@ -1149,9 +1150,14 @@ function App() {
     event.target.value = ''
   }
 
-  const removeProjectById = (projectId) => {
-    setProjects((prev) => prev.filter((p) => p.id !== projectId))
-    setSelectedProject((prev) => (prev?.id === projectId ? null : prev))
+  const removeProjectById = async (projectId) => {
+    try {
+      if (isCloudEnabled()) await deleteProjectsInCloud([projectId])
+      setProjects((prev) => prev.filter((p) => p.id !== projectId))
+      setSelectedProject((prev) => (prev?.id === projectId ? null : prev))
+    } catch (error) {
+      window.alert(error?.code === 'REVISION_MISMATCH' ? '数据已被其他端更新，请刷新后重新删除。' : `删除工单失败：${error?.message || error}`)
+    }
   }
 
   const confirmDeleteProject = (project) => {
@@ -1162,7 +1168,7 @@ function App() {
     ) {
       return
     }
-    removeProjectById(project.id)
+    void removeProjectById(project.id)
   }
 
   const handleProjectLineClick = (project) => {
@@ -1183,7 +1189,7 @@ function App() {
     setEditingProject(true)
   }
 
-  const saveProjectEdit = () => {
+  const saveProjectEdit = async () => {
     if (!selectedProject || !editForm) {
       return
     }
@@ -1312,10 +1318,15 @@ function App() {
       workerEnabled: workerIds.length > 0,
     }
 
-    setProjects((prev) => prev.map((project) => (project.id === selectedProject.id ? nextProject : project)))
-    setSelectedProject(nextProject)
-    setEditingProject(false)
-    setEditForm(null)
+    try {
+      if (isCloudEnabled()) await updateProjectInCloud(nextProject)
+      setProjects((prev) => prev.map((project) => (project.id === selectedProject.id ? nextProject : project)))
+      setSelectedProject(nextProject)
+      setEditingProject(false)
+      setEditForm(null)
+    } catch (error) {
+      window.alert(error?.code === 'REVISION_MISMATCH' ? '数据已被其他端更新，请刷新后重新编辑。' : `保存工单失败：${error?.message || error}`)
+    }
   }
 
   return (

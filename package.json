@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "eval:intent": "node scripts/evaluate-intent.mjs"
+    "eval:intent": "node scripts/evaluate-intent.mjs",
+    "test:security": "node tests/security-contract.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

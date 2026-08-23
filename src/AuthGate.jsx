@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getCloudAuthClient, isCloudEnabled } from './lib/cloudStore'
+import { getCloudAuthClient, isCloudEnabled, requestLoginLink } from './lib/cloudStore'
 
 export default function AuthGate({ children }) {
   const [session, setSession] = useState(undefined)
@@ -18,6 +18,16 @@ export default function AuthGate({ children }) {
   const signIn = async (event) => {
     event.preventDefault()
     setMessage('')
+    try {
+      const preflight = await requestLoginLink(email)
+      if (!preflight.shouldSend) {
+        setMessage('如果该邮箱获准访问，登录链接将会发送；请稍后查看邮箱。')
+        return
+      }
+    } catch {
+      setMessage('暂时无法请求登录链接，请稍后再试。')
+      return
+    }
     const { error } = await getCloudAuthClient().auth.signInWithOtp({
       email,
       options: { emailRedirectTo: window.location.origin },
