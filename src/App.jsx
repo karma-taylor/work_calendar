@@ -179,7 +179,7 @@ const parseStaffBuffer = async (buffer) => {
         continue
       }
       const item = {
-        id: `staff-${sheetName}-${rowIndex + 1}`,
+        id: normalize(row[4]) || `staff-${sheetName}-${rowIndex + 1}`,
         name,
         title,
         tradeTag: title || '未分类',
@@ -392,7 +392,6 @@ function App() {
   /** 避免首屏用空数组覆盖 localStorage（必须在读完缓存后才允许写入） */
   const [projectsHydrated, setProjectsHydrated] = useState(false)
   const [showModal, setShowModal] = useState(false)
-  const [showManagerCandidates, setShowManagerCandidates] = useState(false)
   const [selectedProject, setSelectedProject] = useState(null)
   const [editingProject, setEditingProject] = useState(false)
   const [editForm, setEditForm] = useState(null)
@@ -752,7 +751,6 @@ function App() {
 
   const closeModal = () => {
     setShowModal(false)
-    setShowManagerCandidates(false)
     setForm({
       name: '',
       startDate: toInputDate(today),
@@ -1525,71 +1523,27 @@ function App() {
             </div>
 
             <fieldset>
-              <div className="fieldset-head">
-                <legend>创建管理人员</legend>
-                <button
-                  type="button"
-                  className="secondary-btn small"
-                  onClick={() => setShowManagerCandidates((prev) => !prev)}
-                >
-                  {showManagerCandidates ? '关闭二级菜单' : '打开二级菜单'}
-                </button>
-              </div>
+              <legend>创建管理人员</legend>
               <div className="selected-inline-tip">
                 已选管理人员：
                 {form.managerIds.length === 0
                   ? '未选择'
                   : getDisplayName(managers, form.managerIds) || `已选 ${form.managerIds.length} 人`}
               </div>
-              {showManagerCandidates && (
-                <div className="manager-candidate-wrap">
-                  <div className="select-grid">
-                    {managers.length === 0 && <div>请先导入人员 Excel</div>}
-                    {managers.map((manager) => {
-                      const isChecked = form.managerIds.includes(manager.id)
-                      return (
-                        <div key={manager.id} className="manager-check-item">
-                          <input
-                            type="checkbox"
-                            id={`mgr-cb-${manager.id}`}
-                            checked={isChecked}
-                            onChange={(e) => {
-                              const checked = e.target.checked
-                              setForm((prev) => ({
-                                ...prev,
-                                managerIds: checked
-                                  ? [...prev.managerIds, manager.id]
-                                  : prev.managerIds.filter((item) => item !== manager.id),
-                              }))
-                            }}
-                          />
-                          <label htmlFor={`mgr-cb-${manager.id}`}>
-                            {manager.name}({manager.sourceSheet})
-                          </label>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  <div className="manager-candidate-actions">
-                    <span className="manager-selected-count">
-                      {form.managerIds.length > 0 ? `已选 ${form.managerIds.length} 人` : '未选择'}
-                    </span>
-                    <button
-                      type="button"
-                      className="create-btn"
-                      onClick={() => setShowManagerCandidates(false)}
-                    >
-                      确定并关闭
-                    </button>
-                  </div>
-                </div>
+              {managers.length === 0 ? <div>请先导入人员 Excel</div> : (
+                <MultiPeoplePicker
+                  options={managers}
+                  selectedIds={form.managerIds}
+                  onChange={(managerIds) => setForm((prev) => ({ ...prev, managerIds }))}
+                  placeholder="选择管理人员（可多选）"
+                />
               )}
             </fieldset>
 
             <fieldset>
               <legend>人员分段安排（推荐）</legend>
               <p className="assignment-tip">
-                矩阵安排仅用于工人。每行可一次选择多人，并设置工种和参与时间段。
+                矩阵安排仅用于工人。每行可一次选择多人；工种会按所选人员自动显示，并设置参与时间段。
               </p>
               <div className="assignment-rows">
                 {form.assignments.length === 0 && (
@@ -1718,30 +1672,14 @@ function App() {
                 </div>
                 <fieldset>
                   <legend>管理人员</legend>
-                  <div className="select-grid">
-                    {managers.length === 0 && <div>请先导入人员 Excel</div>}
-                    {managers.map((manager) => (
-                      <div key={manager.id} className="manager-check-item">
-                        <input
-                          type="checkbox"
-                          id={`edit-mgr-cb-${manager.id}`}
-                          checked={editForm.managerIds.includes(manager.id)}
-                          onChange={(e) => {
-                            const checked = e.target.checked
-                            setEditForm((prev) => ({
-                              ...prev,
-                              managerIds: checked
-                                ? [...prev.managerIds, manager.id]
-                                : prev.managerIds.filter((item) => item !== manager.id),
-                            }))
-                          }}
-                        />
-                        <label htmlFor={`edit-mgr-cb-${manager.id}`}>
-                          {manager.name}({manager.sourceSheet})
-                        </label>
-                      </div>
-                    ))}
-                  </div>
+                  {managers.length === 0 ? <div>请先导入人员 Excel</div> : (
+                    <MultiPeoplePicker
+                      options={managers}
+                      selectedIds={editForm.managerIds}
+                      onChange={(managerIds) => setEditForm((prev) => ({ ...prev, managerIds }))}
+                      placeholder="选择管理人员（可多选）"
+                    />
+                  )}
                 </fieldset>
                 <fieldset>
                   <legend>工人分段安排</legend>
