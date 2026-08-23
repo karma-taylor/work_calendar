@@ -217,16 +217,16 @@ const createEmptyAssignment = (startDate, endDate) => ({
   note: '',
 })
 
-/** 暗色主题下的工单胶囊调色板：半透明底色 + 同色系高亮文字，无硬边框 */
+/** 明亮界面下的工单胶囊调色板：低饱和底色 + 清晰文字与细边框 */
 const PROJECT_PALETTE = [
-  { bg: 'rgba(79, 70, 229, 0.20)', fg: '#a5b4fc', border: 'transparent' },
-  { bg: 'rgba(56, 189, 248, 0.20)', fg: '#7dd3fc', border: 'transparent' },
-  { bg: 'rgba(45, 212, 191, 0.20)', fg: '#5eead4', border: 'transparent' },
-  { bg: 'rgba(168, 85, 247, 0.20)', fg: '#d8b4fe', border: 'transparent' },
-  { bg: 'rgba(244, 114, 182, 0.20)', fg: '#f9a8d4', border: 'transparent' },
-  { bg: 'rgba(251, 191, 36, 0.20)', fg: '#fcd34d', border: 'transparent' },
-  { bg: 'rgba(34, 197, 94, 0.20)', fg: '#86efac', border: 'transparent' },
-  { bg: 'rgba(248, 113, 113, 0.20)', fg: '#fca5a5', border: 'transparent' },
+  { bg: '#e4f4ed', fg: '#176b51', border: '#bfe1cf' },
+  { bg: '#e4f2f8', fg: '#286778', border: '#bfdae6' },
+  { bg: '#e9f5df', fg: '#4e7530', border: '#cee4b9' },
+  { bg: '#efeafa', fg: '#66528d', border: '#d8cbed' },
+  { bg: '#f9e8ee', fg: '#93516a', border: '#ebc6d4' },
+  { bg: '#fff3d9', fg: '#90651d', border: '#f0dcae' },
+  { bg: '#e2f5f0', fg: '#237768', border: '#bde2d8' },
+  { bg: '#fbe8e4', fg: '#9b5545', border: '#efc9bf' },
 ]
 
 const getProjectColor = (projectId) => {

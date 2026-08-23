@@ -8,8 +8,8 @@ body,
 body {
   font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Tahoma,
     Geneva, Verdana, sans-serif;
-  background: #0f111a;
-  color: #ffffff;
+  background: #f5f9f7;
+  color: #20342c;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
