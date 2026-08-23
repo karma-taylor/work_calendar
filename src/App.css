@@ -904,6 +904,86 @@ button:hover,
 
 .project-modal h2 { color: #1f3f34; }
 
+.project-modal > h2 {
+  position: relative;
+  margin: 0 0 4px;
+  padding-left: 14px;
+  font-size: 22px;
+  letter-spacing: -0.025em;
+}
+
+.project-modal > h2::before {
+  position: absolute;
+  left: 0;
+  top: 0.18em;
+  width: 4px;
+  height: 1.15em;
+  border-radius: 99px;
+  background: var(--brand);
+  content: '';
+}
+
+.project-modal {
+  gap: 16px;
+  padding: 26px;
+  border-radius: 20px;
+}
+
+.project-modal > label,
+.date-row > label {
+  color: #496258;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.project-modal input,
+.project-modal select,
+.people-picker-summary {
+  min-height: 42px;
+  box-sizing: border-box;
+}
+
+.project-modal fieldset {
+  padding: 16px;
+  border-radius: 14px;
+}
+
+.project-modal legend {
+  padding: 0 7px;
+  color: #355147;
+  font-size: 14px;
+}
+
+.assignment-tip {
+  margin: 2px 0 10px;
+  line-height: 1.6;
+}
+
+.assignment-row {
+  padding: 10px;
+  border: 1px solid #e3eee8;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.picked-summary {
+  gap: 7px;
+  border-style: solid;
+  border-color: #dcebe3;
+  background: #f5fbf7;
+  color: #5d7469;
+}
+
+.modal-actions {
+  margin-top: 2px;
+  padding-top: 4px;
+}
+
+.modal-actions button {
+  min-height: 40px;
+  padding-inline: 16px;
+}
+
 input,
 select,
 .people-picker-summary {
@@ -1114,5 +1194,10 @@ legend { color: #355147; }
 
   .people-picker-panel {
     width: min(92vw, 560px);
+  }
+
+  .project-modal {
+    max-height: calc(100vh - 24px);
+    padding: 20px;
   }
 }
