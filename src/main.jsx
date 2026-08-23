@@ -2,6 +2,7 @@ import { Component, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
+import AuthGate from './AuthGate.jsx'
 
 class RootErrorBoundary extends Component {
   constructor(props) {
@@ -47,8 +48,6 @@ class RootErrorBoundary extends Component {
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <RootErrorBoundary>
-      <App />
-    </RootErrorBoundary>
+    <RootErrorBoundary><AuthGate><App /></AuthGate></RootErrorBoundary>
   </StrictMode>,
 )

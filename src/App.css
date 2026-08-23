@@ -651,6 +651,29 @@ legend {
   margin-bottom: 8px;
 }
 
+.people-picker-companies,
+.trade-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.trade-tags {
+  min-height: 42px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.trade-tag {
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(45, 212, 191, 0.18);
+  color: #5eead4;
+  font-size: 13px;
+}
+
 .people-picker-list {
   max-height: 220px;
   overflow: auto;

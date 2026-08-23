@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+work-calendar-private/
 
 # Editor directories and files
 .vscode/*

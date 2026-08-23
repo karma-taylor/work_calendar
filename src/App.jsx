@@ -19,7 +19,7 @@ const isCsiStaffSheet = (sheetName) => {
 const START_ROW_INDEX = 2
 const PROJECTS_STORAGE_KEY = 'work-calendar-projects-v1'
 /** 人员名单解析结果 + 是否曾选择「锁定」——刷新后必能恢复，不依赖文件句柄权限 */
-const STAFF_CACHE_KEY = 'work-calendar-staff-cache-v2'
+const STAFF_CACHE_KEY = 'work-calendar-staff-cache-v3'
 
 function readStaffCache() {
   if (typeof window === 'undefined') {
@@ -138,7 +138,7 @@ const toDayStart = (dateValue) => {
 }
 
 const dayDiff = (a, b) => Math.round((toDayStart(a) - toDayStart(b)) / MS_PER_DAY)
-const personUniqueKey = (person) => `${person.name}@@${person.sourceSheet}`
+const personUniqueKey = (person) => person.id
 
 const readFileWithProgress = (file, onProgress) =>
   new Promise((resolve, reject) => {
@@ -179,9 +179,10 @@ const parseStaffBuffer = async (buffer) => {
         continue
       }
       const item = {
-        id: `${sheetName}-${rowIndex + 1}-${name}-${title || '未知岗位'}`,
+        id: `staff-${sheetName}-${rowIndex + 1}`,
         name,
         title,
+        tradeTag: title || '未分类',
         sourceSheet: sheetName,
       }
       if (isCsiStaffSheet(sheetName)) {
@@ -299,16 +300,15 @@ const getAssignmentsByDay = (project, allPeople) => {
 function MultiPeoplePicker({ options, selectedIds, onChange, placeholder }) {
   const detailsRef = useRef(null)
   const [keyword, setKeyword] = useState('')
+  const [company, setCompany] = useState('全部')
   const selectedSet = useMemo(() => new Set(selectedIds || []), [selectedIds])
   const filteredOptions = useMemo(() => {
     const q = keyword.trim().toLowerCase()
-    if (!q) {
-      return options
-    }
     return options.filter((person) =>
-      `${person.name}${person.sourceSheet}${person.title || ''}`.toLowerCase().includes(q),
+      (company === '全部' || person.sourceSheet === company) && (!q || person.name.toLowerCase().includes(q)),
     )
-  }, [keyword, options])
+  }, [keyword, options, company])
+  const companies = useMemo(() => ['全部', ...Array.from(new Set(options.map((person) => person.sourceSheet)))], [options])
 
   const toggleId = (id) => {
     if (selectedSet.has(id)) {
@@ -329,13 +329,18 @@ function MultiPeoplePicker({ options, selectedIds, onChange, placeholder }) {
           className="people-picker-search"
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
-          placeholder="搜索姓名/公司"
+          placeholder="搜索姓名"
         />
         <div className="people-picker-actions">
+          <div className="people-picker-companies">
+            {companies.map((item) => (
+              <button type="button" key={item} className={item === company ? 'secondary-btn small active' : 'secondary-btn small'} onClick={() => setCompany(item)}>{item}</button>
+            ))}
+          </div>
           <button
             type="button"
             className="secondary-btn small"
-            onClick={() => onChange(options.map((item) => item.id))}
+            onClick={() => onChange(Array.from(new Set([...(selectedIds || []), ...filteredOptions.map((item) => item.id)])))}
           >
             全选
           </button>
@@ -360,7 +365,7 @@ function MultiPeoplePicker({ options, selectedIds, onChange, placeholder }) {
                 onChange={() => toggleId(person.id)}
               />
               <span className="people-picker-label">
-                {person.name}（{person.sourceSheet}）
+                {person.name}
               </span>
             </label>
           ))}
@@ -873,7 +878,7 @@ function App() {
         id: crypto.randomUUID(),
         personId,
         role: 'worker',
-        trade: row.trade || '',
+        trade: workers.find((person) => person.id === personId)?.tradeTag || '未分类',
         segmentStart: row.segmentStart,
         segmentEnd: row.segmentEnd,
         note: row.note || '',
@@ -1202,7 +1207,7 @@ function App() {
         id: crypto.randomUUID(),
         personId,
         role: 'worker',
-        trade: row.trade || '',
+        trade: workers.find((person) => person.id === personId)?.tradeTag || '未分类',
         segmentStart: row.segmentStart,
         segmentEnd: row.segmentEnd,
         note: row.note || '',
@@ -1598,11 +1603,9 @@ function App() {
                       onChange={(personIds) => updateAssignmentRow(row.id, { personIds })}
                       placeholder="选择工人（可多选）"
                     />
-                    <input
-                      value={row.trade || ''}
-                      onChange={(event) => updateAssignmentRow(row.id, { trade: event.target.value })}
-                      placeholder="工种（如：电工）"
-                    />
+                    <div className="trade-tags">
+                      {Array.from(new Set((row.personIds || []).map((id) => workers.find((person) => person.id === id)?.tradeTag || '未分类'))).map((tag) => <span key={tag} className="trade-tag">{tag}</span>)}
+                    </div>
                     <input
                       type="date"
                       value={row.segmentStart}
@@ -1754,13 +1757,9 @@ function App() {
                           onChange={(personIds) => updateEditAssignmentRow(row.id, { personIds })}
                           placeholder="选择工人（可多选）"
                         />
-                        <input
-                          value={row.trade || ''}
-                          onChange={(event) =>
-                            updateEditAssignmentRow(row.id, { trade: event.target.value })
-                          }
-                          placeholder="工种（如：电工）"
-                        />
+                        <div className="trade-tags">
+                          {Array.from(new Set((row.personIds || []).map((id) => workers.find((person) => person.id === id)?.tradeTag || '未分类'))).map((tag) => <span key={tag} className="trade-tag">{tag}</span>)}
+                        </div>
                         <input
                           type="date"
                           value={row.segmentStart}

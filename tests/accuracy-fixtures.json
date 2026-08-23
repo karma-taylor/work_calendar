@@ -1,0 +1,7 @@
+[
+  {"input":"把张工下周三的排班调到李工名下", "expected":{"intent":"reassign","source_person":"张工","target_person":"李工","date_resolution":"relative_next_wednesday"}},
+  {"input":"给江都项目安排王工，时间 2026-08-26 到 2026-08-28", "expected":{"intent":"create","project":"江都项目","person":"王工","startDate":"2026-08-26","endDate":"2026-08-28"}},
+  {"input":"删除科林检修工单", "expected":{"intent":"delete","project":"科林检修工单"}},
+  {"input":"把省建表的张工安排到 9 月 1 日", "expected":{"intent":"create_or_reassign","person":"张工","sourceSheet":"省建","startDate":"relative_year_09_01"}},
+  {"input":"给张工排明天", "expected":{"intent":"ambiguous","missing":["project","sourceSheet_if_duplicate","role"]}}
+]
