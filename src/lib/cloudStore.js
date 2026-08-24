@@ -1,9 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
+import { isDemoMode } from './demoMode'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 const apiUrl = import.meta.env.VITE_WORK_CALENDAR_API_URL || (supabaseUrl ? `${supabaseUrl}/functions/v1/work-calendar` : '')
-const cloudEnabled = Boolean(supabaseUrl && supabaseAnonKey && apiUrl)
+const cloudEnabled = !isDemoMode && Boolean(supabaseUrl && supabaseAnonKey && apiUrl)
 let client
 let projectsRevision = null
 let staffRevision = null

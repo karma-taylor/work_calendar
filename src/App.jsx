@@ -10,6 +10,8 @@ import {
   updateProjectInCloud,
   deleteProjectsInCloud,
 } from './lib/cloudStore'
+import { isDemoMode } from './lib/demoMode'
+import { demoProjects, demoStaff } from './demoData'
 
 const TARGET_SHEETS = new Set(['江都', '省建', '科林'])
 const normalize = (value) => String(value ?? '').trim()
@@ -380,19 +382,19 @@ function MultiPeoplePicker({ options, selectedIds, onChange, placeholder }) {
 function App() {
   const [currentYear, setCurrentYear] = useState(today.getFullYear())
   const [currentMonth, setCurrentMonth] = useState(today.getMonth())
-  const [managers, setManagers] = useState(() => readStaffCache()?.managers ?? [])
-  const [workers, setWorkers] = useState(() => readStaffCache()?.workers ?? [])
-  const [staffFileName, setStaffFileName] = useState(() => readStaffCache()?.staffFileName ?? '')
+  const [managers, setManagers] = useState(() => (isDemoMode ? demoStaff.managers : readStaffCache()?.managers ?? []))
+  const [workers, setWorkers] = useState(() => (isDemoMode ? demoStaff.workers : readStaffCache()?.workers ?? []))
+  const [staffFileName, setStaffFileName] = useState(() => (isDemoMode ? '作品集虚构数据' : readStaffCache()?.staffFileName ?? ''))
   /** 与本地 Excel 的锁定关系（含缓存的「曾锁定」状态，刷新后从 localStorage 恢复） */
-  const [staffFileLocked, setStaffFileLocked] = useState(() => readStaffCache()?.lockIntent ?? false)
+  const [staffFileLocked, setStaffFileLocked] = useState(() => (isDemoMode ? false : readStaffCache()?.lockIntent ?? false))
   /** 曾锁定但 IndexedDB 句柄失效或权限未通过：名单仍来自缓存，需重新选文件才能自动跟文件同步 */
   const [staffNeedRelink, setStaffNeedRelink] = useState(false)
   const staffHandleRef = useRef(null)
   const staffLastModifiedRef = useRef(0)
   const [staffPollEnabled, setStaffPollEnabled] = useState(false)
-  const [projects, setProjects] = useState([])
+  const [projects, setProjects] = useState(() => (isDemoMode ? demoProjects : []))
   /** 避免首屏用空数组覆盖 localStorage（必须在读完缓存后才允许写入） */
-  const [projectsHydrated, setProjectsHydrated] = useState(false)
+  const [projectsHydrated, setProjectsHydrated] = useState(isDemoMode)
   const [showModal, setShowModal] = useState(false)
   const [selectedProject, setSelectedProject] = useState(null)
   const [editingProject, setEditingProject] = useState(false)
@@ -434,12 +436,14 @@ function App() {
   }, [])
 
   const persistStaffImport = async (result) => {
+    if (isDemoMode) return
     if (isCloudEnabled()) {
       await saveStaffToCloud(result)
     }
   }
 
   useEffect(() => {
+    if (isDemoMode) return undefined
     let cancelled = false
     void (async () => {
       try {
@@ -492,7 +496,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!projectsHydrated) {
+    if (isDemoMode || !projectsHydrated) {
       return
     }
     try {
@@ -504,6 +508,7 @@ function App() {
 
   /** 人员名单持久化：刷新即可恢复，不依赖文件系统 API 权限 */
   useEffect(() => {
+    if (isDemoMode) return undefined
     try {
       window.localStorage.setItem(
         STAFF_CACHE_KEY,
@@ -553,7 +558,7 @@ function App() {
 
   /** 从 IndexedDB 恢复上次锁定的 Excel 文件句柄（用于检测磁盘文件是否更新；失败时仍保留 localStorage 中的名单） */
   useEffect(() => {
-    if (!('indexedDB' in window)) {
+    if (isDemoMode || !('indexedDB' in window)) {
       return undefined
     }
     let cancelled = false
@@ -611,7 +616,7 @@ function App() {
 
   /** 轮询同一文件是否被覆盖保存，变更后自动重新解析（每次从 ref 读句柄，避免「更换锁定」后仍用旧句柄） */
   useEffect(() => {
-    if (!staffPollEnabled) {
+    if (isDemoMode || !staffPollEnabled) {
       return undefined
     }
 
@@ -852,6 +857,10 @@ function App() {
 
   const submitProject = async (event) => {
     event.preventDefault()
+    if (isDemoMode) {
+      window.alert('作品集演示站为只读模式，不会写入任何数据。')
+      return
+    }
     if (!form.name.trim()) {
       window.alert('请填写工单名称')
       return
@@ -1151,6 +1160,10 @@ function App() {
   }
 
   const removeProjectById = async (projectId) => {
+    if (isDemoMode) {
+      window.alert('作品集演示站为只读模式，不会删除数据。')
+      return
+    }
     try {
       if (isCloudEnabled()) await deleteProjectsInCloud([projectId])
       setProjects((prev) => prev.filter((p) => p.id !== projectId))
@@ -1190,6 +1203,10 @@ function App() {
   }
 
   const saveProjectEdit = async () => {
+    if (isDemoMode) {
+      window.alert('作品集演示站为只读模式，不会保存修改。')
+      return
+    }
     if (!selectedProject || !editForm) {
       return
     }
@@ -1358,12 +1375,14 @@ function App() {
 
         <div className="sidebar-section">
           <div className="sidebar-section-title">云端同步</div>
-          <div className={`sync-pill ${isCloudEnabled() ? 'is-on' : 'is-off'}`}>
+          <div className={`sync-pill ${isDemoMode || isCloudEnabled() ? 'is-on' : 'is-off'}`}>
             <span className="sync-dot" />
-            {isCloudEnabled() ? '已启用 Supabase' : '仅本地缓存'}
+            {isDemoMode ? '作品集演示数据' : isCloudEnabled() ? '已启用 Supabase' : '仅本地缓存'}
           </div>
           <div className="sidebar-hint">
-            {isCloudEnabled()
+            {isDemoMode
+              ? '完全虚构的数据，只读展示，不连接生产环境'
+              : isCloudEnabled()
               ? '工单与人员名单自动同步并保留快照'
               : '配置 Supabase 后可实现跨设备同步'}
           </div>
@@ -1398,6 +1417,10 @@ function App() {
           </button>
         </div>
         <div className="header-actions">
+          {isDemoMode ? (
+            <div className="demo-mode-notice" role="status">公开演示 · 虚构数据 · 只读</div>
+          ) : (
+            <>
           <label className="delete-mode-toggle">
             <input
               type="checkbox"
@@ -1421,6 +1444,8 @@ function App() {
           <button className="create-btn" type="button" onClick={() => setShowModal(true)}>
             创建工单
           </button>
+            </>
+          )}
         </div>
       </header>
       {staffNeedRelink && (
@@ -1431,11 +1456,11 @@ function App() {
       )}
       <p className="staff-tip">
         名单: {staffFileName || '未导入'} | 管理人员 {managers.length} 人 | 工人 {workers.length} 人
-        {isCloudEnabled() ? ' | 云端同步已启用（免费 Supabase）' : ' | 当前仅本地缓存'}
-        {staffFileLocked
+        {isDemoMode ? ' | 本站不读取本地文件或云端真实数据' : isCloudEnabled() ? ' | 云端同步已启用（免费 Supabase）' : ' | 当前仅本地缓存'}
+        {!isDemoMode && (staffFileLocked
           ? ' | 已锁定（名单已存本机浏览器，刷新保留；若文件句柄有效，保存 Excel 后约 8 秒内自动更新）'
-          : ' | 名单已缓存到本机浏览器（刷新保留）'}
-        {!staffFileLocked && supportsFilePicker()
+          : ' | 名单已缓存到本机浏览器（刷新保留）')}
+        {!isDemoMode && !staffFileLocked && supportsFilePicker()
           ? ' | 建议点「锁定人员名单文件」关联本地文件'
           : ''}
         {!supportsFilePicker() ? ' | 当前浏览器请用「临时导入Excel」' : ''}
@@ -1637,7 +1662,7 @@ function App() {
           <div className="project-modal details-modal">
             <div className="fieldset-head">
               <h2>工单详情</h2>
-              <button
+              {!isDemoMode && <button
                 type="button"
                 className="secondary-btn small"
                 onClick={() => {
@@ -1650,7 +1675,7 @@ function App() {
                 }}
               >
                 {editingProject ? '退出编辑' : '编辑'}
-              </button>
+              </button>}
             </div>
             {editingProject && editForm ? (
               <section key="edit-mode" className="details-mode-body">
@@ -1790,7 +1815,7 @@ function App() {
               </section>
             )}
             <div className="modal-actions">
-              {deleteMode && (
+              {!isDemoMode && deleteMode && (
                 <button
                   className="danger-btn"
                   type="button"
@@ -1799,7 +1824,7 @@ function App() {
                   删除此工单
                 </button>
               )}
-              {editingProject && (
+              {!isDemoMode && editingProject && (
                 <button className="create-btn" type="button" onClick={saveProjectEdit}>
                   保存修改
                 </button>

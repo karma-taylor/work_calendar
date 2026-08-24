@@ -1034,6 +1034,20 @@ legend { color: #355147; }
 .details-modal .detail-item,
 .assignment-list-item { color: #355147; }
 
+.demo-mode-notice {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #b9dfd4;
+  border-radius: 10px;
+  background: #f1faf7;
+  color: #13785f;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
 /* Authentication uses the same airy visual language as the calendar. */
 .auth-screen {
   box-sizing: border-box;
