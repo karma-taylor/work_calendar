@@ -14,6 +14,10 @@ dist-ssr
 .env
 work-calendar-private/
 
+# Sensitive local roster. This file may contain identity documents and must
+# never be committed, even when it has been anonymized for local use.
+人员名单.xlsx
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
