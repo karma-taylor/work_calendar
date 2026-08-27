@@ -88,6 +88,10 @@ if (!existingPeople.length) {
 let revision = state.revision
 for (const project of missingProjects) {
   const applied = await request<{ revision: string }>('create_project', { project, expectedRevision: revision })
+  if (!applied.revision) fail(`create_project returned no revision for ${project.id}. Refusing to continue with an unreliable staging write.`)
   revision = applied.revision
 }
-console.log(JSON.stringify({ ok: true, createdStaff: existingPeople.length ? 0 : 50, createdProjects: missingProjects.length, projectRevision: revision, staffRevision }, null, 2))
+const verified = await request<{ projects: Project[] }>('read', { scope: { full: true } })
+const seededProjectCount = verified.projects.filter((project) => project.id.startsWith('seed-project-')).length
+if (seededProjectCount !== seedProjects.length) fail(`Seed verification failed: expected ${seedProjects.length} projects, found ${seededProjectCount}.`)
+console.log(JSON.stringify({ ok: true, createdStaff: existingPeople.length ? 0 : 50, createdProjects: missingProjects.length, seededProjectCount, projectRevision: revision, staffRevision }, null, 2))

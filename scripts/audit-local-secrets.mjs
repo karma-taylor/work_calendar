@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 
 const label = 'work-calendar-staging-deploy'
-const tracked = spawnSync('git', ['grep', '-n', '--fixed-strings', label], { encoding: 'utf8' })
+const tracked = spawnSync('git', ['grep', '-n', '--fixed-strings', label, '--', ':!scripts/audit-local-secrets.mjs'], { encoding: 'utf8' })
 const candidateFiles = ['.env', '.env.local', '.env.staging.local']
 const references = candidateFiles.filter((file) => existsSync(file) && readFileSync(file, 'utf8').includes(label))
 

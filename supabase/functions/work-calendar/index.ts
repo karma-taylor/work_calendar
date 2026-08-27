@@ -177,14 +177,20 @@ Deno.serve(async (req) => {
       if (!can(principal, 'scheduler')) { await audit(false, 'FORBIDDEN'); return reply({ error: 'FORBIDDEN' }, 403, origin) }
       const [projects, staff] = await Promise.all([getState('projects'), getState('staff')]); const command = operation === 'preview' ? String(body.mutation || '') : operation; const next = validateProjects(candidate(command, body, projects.payload as any[]), staff.payload)
       if (operation === 'preview') { await audit(true, undefined, { returned_records: next.length, payload_token_estimate: estimateTokens(next) }); return reply({ ok: true }, 200, origin) }
-      const { data: applied, error } = await writeState('projects', next, body.expectedRevision, true); if (error) throw error; if (applied.status === 'REVISION_MISMATCH') { await audit(false, 'REVISION_MISMATCH', { revision: applied.revision }); return reply({ error: 'REVISION_MISMATCH', revision: applied.revision }, 409, origin) }
+      const { data: applied, error } = await writeState('projects', next, body.expectedRevision, true); if (error) throw error
+      const appliedState = Array.isArray(applied) ? applied[0] : applied
+      if (!appliedState || appliedState.status === 'REVISION_MISMATCH') { await audit(false, 'REVISION_MISMATCH', { revision: appliedState?.revision || null }); return reply({ error: 'REVISION_MISMATCH', revision: appliedState?.revision || null }, 409, origin) }
+      if (appliedState.status !== 'OK') throw new Error('STATE_WRITE_FAILED')
       const { error: syncError } = await admin.rpc('sync_work_calendar_schedule_from_state', { p_workspace_id: workspaceId }); if (syncError) throw syncError
-      await audit(true, undefined, { revision: applied.revision, returned_records: next.length, payload_token_estimate: estimateTokens(next), created_project_count: operation === 'create_project' ? 1 : 0, change_summary: { operation, project_ids: operation === 'delete_projects' ? body.deleteProjectIds : [body.project.id] } }); return reply({ ok: true, revision: applied.revision }, 200, origin)
+      await audit(true, undefined, { revision: appliedState.revision, returned_records: next.length, payload_token_estimate: estimateTokens(next), created_project_count: operation === 'create_project' ? 1 : 0, change_summary: { operation, project_ids: operation === 'delete_projects' ? body.deleteProjectIds : [body.project.id] } }); return reply({ ok: true, revision: appliedState.revision }, 200, origin)
     }
     if (operation === 'apply_staff') {
       if (!can(principal, 'roster_admin')) { await audit(false, 'FORBIDDEN'); return reply({ error: 'FORBIDDEN' }, 403, origin) }
-      const existing = await getState('staff'), next = validateStaff(body.staff, existing.payload); const { data: applied, error } = await writeState('staff', next, body.expectedRevision, false); if (error) throw error; if (applied.status === 'REVISION_MISMATCH') { await audit(false, 'REVISION_MISMATCH', { revision: applied.revision }); return reply({ error: 'REVISION_MISMATCH', revision: applied.revision }, 409, origin) }
-      await audit(true, undefined, { revision: applied.revision, returned_records: next.managers.length + next.workers.length, change_summary: { managers: next.managers.length, workers: next.workers.length } }); return reply({ ok: true, revision: applied.revision }, 200, origin)
+      const existing = await getState('staff'), next = validateStaff(body.staff, existing.payload); const { data: applied, error } = await writeState('staff', next, body.expectedRevision, false); if (error) throw error
+      const appliedState = Array.isArray(applied) ? applied[0] : applied
+      if (!appliedState || appliedState.status === 'REVISION_MISMATCH') { await audit(false, 'REVISION_MISMATCH', { revision: appliedState?.revision || null }); return reply({ error: 'REVISION_MISMATCH', revision: appliedState?.revision || null }, 409, origin) }
+      if (appliedState.status !== 'OK') throw new Error('STATE_WRITE_FAILED')
+      await audit(true, undefined, { revision: appliedState.revision, returned_records: next.managers.length + next.workers.length, change_summary: { managers: next.managers.length, workers: next.workers.length } }); return reply({ ok: true, revision: appliedState.revision }, 200, origin)
     }
     if (operation === 'metrics') {
       if (!can(principal, 'roster_admin')) { await audit(false, 'FORBIDDEN'); return reply({ error: 'FORBIDDEN' }, 403, origin) }
