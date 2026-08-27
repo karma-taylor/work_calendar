@@ -1,0 +1,19 @@
+{
+  "expectedRevision": "2026-08-24T10:01:24.382Z",
+  "patches": [
+    {
+      "action": "replace_assignee",
+      "shift_id": "shift-7b6d",
+      "old": {
+        "person_id": "staff-worker-018",
+        "role": "worker",
+        "trade_tag": "电工",
+        "start_date": "2026-08-25",
+        "end_date": "2026-08-25"
+      },
+      "new": {
+        "person_id": "staff-worker-042"
+      }
+    }
+  ]
+}

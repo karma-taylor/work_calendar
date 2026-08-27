@@ -1,0 +1,39 @@
+name: Validate and deploy staging backend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: work-calendar-staging
+  cancel-in-progress: true
+
+jobs:
+  validate-and-deploy-staging:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:security
+      - run: npm run test:patch
+      - run: npm run build
+      - name: Deploy staging Edge Function
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_STAGING_PROJECT_REF: ${{ secrets.SUPABASE_STAGING_PROJECT_REF }}
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_STAGING_PROJECT_REF"
+          npx --yes supabase@2.115.0 functions deploy work-calendar \
+            --project-ref "$SUPABASE_STAGING_PROJECT_REF" \
+            --no-verify-jwt --use-api

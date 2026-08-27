@@ -19,6 +19,7 @@ Work Calendar 是一个面向工程项目的排班日历：用月视图管理工
 - 按公司筛选人员，支持搜索、多选、全选、清空和工种标签自动汇总。
 - 服务端以匿名人员 ID 校验同一工单内及跨工单的时间重叠，避免重复排班。
 - 所有写入先读取最新 revision；数据在另一端更新时返回 `REVISION_MISMATCH`，不会静默覆盖他人的变更。
+- 对既有班次的改派、调整日期或取消使用局部读取 → JSON Patch 预览 → 用户确认 → 事务级行更新，不会全量重排。
 - 支持网页登录和 Codex Skill 共用同一数据、规则、审计与历史快照。
 
 ## 使用效果
@@ -63,6 +64,18 @@ VITE_WORK_CALENDAR_API_URL=https://<project-ref>.supabase.co/functions/v1/work-c
 
 这些变量只用于网页连接；不要填入 service-role key、Skill Key 或任何人员隐私数据。部署到 Cloudflare Pages 等平台时，在平台的私密环境变量中配置相同名称。
 
+### 本地开发进程与临时凭证
+
+请使用固定的启动、停止和凭证审计命令，避免遗留多个 Vite 进程：
+
+```bash
+npm run dev:local
+npm run stop:local
+npm run audit:local-secrets
+```
+
+停止脚本只会终止监听 `5173`、`5174`、`4173` 且命令行包含 `vite` 的进程，绝不会终止 PID 1 或其他服务。`audit:local-secrets` 不显示密钥内容；若它发现临时 staging PAT 的标签、候选本地配置引用或当前 shell 的 `SUPABASE_ACCESS_TOKEN`，应先在 Supabase Dashboard 的 Access Tokens 页面撤销该 PAT，并在终端执行 `unset SUPABASE_ACCESS_TOKEN`。
+
 ### 3. 登录与导入名单
 
 1. 使用已加入白名单的邮箱请求 Magic Link。
@@ -96,6 +109,34 @@ VITE_WORK_CALENDAR_API_URL=https://<project-ref>.supabase.co/functions/v1/work-c
 6. 为 Skill 创建有 `key_id` 的 SHA-256 哈希记录；明文 Key 仅保存在本机的 `WORK_CALENDAR_API_KEY` 环境变量，绝不写入网页、仓库或数据库。
 7. 在 Supabase Cron 中每日执行 `select public.purge_work_calendar_retention();`，以清理超过保留期的事件和快照。
 
+### Staging 自动播种与 Patch 演练
+
+播种工具只接受明确标记为 `staging` 的项目 URL，且必须额外传入 `--apply` 才会写入。它生成 50 位虚构化名人员和 12 个跨日虚构工单；不读取 Excel，也不接触生产或真实名单。
+
+```bash
+export WORK_CALENDAR_STAGE=staging
+export WORK_CALENDAR_API_URL=https://<staging-ref>.supabase.co/functions/v1/work-calendar
+export WORK_CALENDAR_API_KEY_ID=<staging-key-id>
+# 从本机 Keychain 或私密终端环境注入；不要写入 .env 或仓库
+export WORK_CALENDAR_API_KEY="$(security find-generic-password -s <key-id> -a work-calendar-staging -w)"
+
+npm run seed:staging                 # 仅显示将执行的计划
+npm run seed:staging -- --apply       # 写入虚构 staging 数据
+npm run verify:staging-patch          # 有效预览 + 冲突拒绝
+npm run verify:staging-patch -- --apply # 写入一次，再验证陈旧 revision 被拒绝
+```
+
+第二次验收会刻意使用第一次写入前的 revision 重新提交同一 Patch，期望得到 `409 REVISION_MISMATCH`。仅限 staging；如需反复测试，请删除并重建 staging 数据，或使用新的虚构项目 ID，绝不可对生产运行。
+
+### GitHub Actions：仅部署 staging 后端
+
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) 会在 `main` 收到推送后依次运行 lint、权限契约测试、Patch 契约测试与构建；全部通过才部署 **staging** 的 `work-calendar` Edge Function。请在 GitHub 的 `staging` Environment 中设置下列 Secrets，不能用生产值：
+
+- `SUPABASE_ACCESS_TOKEN`：专用、可轮换的 Supabase PAT；
+- `SUPABASE_STAGING_PROJECT_REF`：staging 项目 Ref。
+
+该工作流不运行数据库迁移、不播种数据、不部署生产。迁移仍需先在 staging SQL Editor/CLI 审核并手动执行。
+
 ## Codex Skill 工作流
 
 `work-calendar` Skill 适用于排班请求，不用于导入 Excel。标准流程为：
@@ -107,6 +148,17 @@ VITE_WORK_CALENDAR_API_URL=https://<project-ref>.supabase.co/functions/v1/work-c
 5. 若发生 `REVISION_MISMATCH`，提示“数据已在其他端更新”，重新读取后再预览，不自动覆盖。
 
 Skill 输出只使用匿名 ID 和化名，不返回真实姓名或原始名单内容。
+
+## 局部增量排班
+
+既有班次的修改以 assignment 的稳定 ID 作为 `shift_id`。客户端或 Skill 先用
+`GET /schedule` 读取目标人员和日期范围，再产生包含旧值断言的 Patch，调用
+`POST /schedule/preview` 进行冲突校验；用户确认后才调用 `PATCH /schedule`。数据库会锁定
+workspace revision 并只更新 Patch 指向的班次行。若 revision 或旧值已经变化，服务端返回
+`REVISION_MISMATCH` 或 `PATCH_PRECONDITION_FAILED`，且不会写入任何行。
+
+示例见 [patch_payload.json](examples/patch_payload.json)。执行新迁移
+`202608240003_schedule_delta.sql` 后，旧的全量工单接口仍可使用，并会同步规范化班次投影。
 
 ## 安全与可观测性
 
@@ -123,6 +175,7 @@ Skill 输出只使用匿名 ID 和化名，不返回真实姓名或原始名单�
 npm run lint
 npm run build
 npm run test:security
+npm run test:patch
 ```
 
 中文自然语言指令评测位于 `tests/accuracy-fixtures.json`。将模型解析结果保存为 JSON 后执行：

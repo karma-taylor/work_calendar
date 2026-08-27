@@ -17,13 +17,18 @@ function getClient() {
 }
 
 async function post(action, payload = {}, { authenticated = true } = {}) {
+  return request('', 'POST', { action, ...payload }, { authenticated })
+}
+
+async function request(path, method, payload, { authenticated = true } = {}) {
   const headers = { 'Content-Type': 'application/json' }
   if (authenticated) {
     const { data: { session } } = await getClient().auth.getSession()
     if (!session?.access_token) throw new Error('请先通过邮箱链接登录后再使用云端排班。')
     headers.Authorization = `Bearer ${session.access_token}`
   }
-  const response = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify({ action, ...payload }) })
+  if (method === 'GET') delete headers['Content-Type']
+  const response = await fetch(`${apiUrl}${path}`, { method, headers, body: method === 'GET' ? undefined : JSON.stringify(payload) })
   const result = await response.json().catch(() => ({}))
   if (!response.ok) {
     const error = new Error(result.error || '云端请求失败')
@@ -64,3 +69,22 @@ export async function saveStaffToCloud(staff) {
 }
 export async function previewProjectInCloud(mutation, payload) { return post('preview', { mutation, ...payload, expectedRevision: projectsRevision }) }
 export async function loadProjectsSnapshotFromCloud() { return null }
+
+/** Read only the people and time window needed for a delta scheduling decision. */
+export async function readScheduleScope({ personIds, start, end }) {
+  const query = new URLSearchParams({ start, end })
+  for (const personId of personIds) query.append('person_id', personId)
+  return request(`/schedule?${query.toString()}`, 'GET')
+}
+
+/** Validate a domain Patch without changing any schedule row. */
+export async function previewSchedulePatch(payload) {
+  return request('/schedule/preview', 'POST', payload)
+}
+
+/** Apply only confirmed shift-level changes; never submit a complete project array. */
+export async function applySchedulePatch(payload) {
+  const result = await request('/schedule', 'PATCH', payload)
+  projectsRevision = result.revision
+  return result
+}

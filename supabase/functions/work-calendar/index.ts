@@ -2,6 +2,13 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 type Role = 'viewer' | 'scheduler' | 'roster_admin'
 type Principal = { channel: 'web' | 'skill' | 'system'; role: Role; userId?: string; keyId?: string }
+type SchedulePatchAction = 'replace_assignee' | 'update_window' | 'cancel_shift'
+type SchedulePatch = {
+  action: SchedulePatchAction
+  shift_id: string
+  old: { person_id: string; role: 'manager' | 'worker'; trade_tag: string; start_date: string; end_date: string }
+  new: Record<string, string>
+}
 const allowedOrigins = (Deno.env.get('WORK_CALENDAR_ALLOWED_ORIGIN') || '').split(',').map((value) => value.trim()).filter(Boolean)
 const workspaceId = Deno.env.get('WORK_CALENDAR_WORKSPACE_ID') || 'default'
 const maxBodyBytes = 64 * 1024, maxProjects = 200, maxAssignments = 100
@@ -14,9 +21,42 @@ const validDate = (value: unknown) => typeof value === 'string' && datePattern.t
 const overlap = (aStart: string, aEnd: string, bStart: string, bEnd: string) => aStart <= bEnd && bStart <= aEnd
 const can = (principal: Principal, required: Role) => rank[principal.role] >= rank[required]
 const estimateTokens = (value: unknown) => Math.ceil(JSON.stringify(value).length / 4)
-const cors = (origin: string | null) => origin && allowedOrigins.includes(origin) ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin', 'Access-Control-Allow-Headers': 'authorization, content-type, x-work-calendar-key, x-work-calendar-key-id', 'Access-Control-Allow-Methods': 'POST, OPTIONS' } : {}
+const allowedOrigin = (origin: string | null) => Boolean(origin && allowedOrigins.includes(origin))
+const cors = (origin: string | null) => allowedOrigin(origin) ? { 'Access-Control-Allow-Origin': origin!, Vary: 'Origin', 'Access-Control-Allow-Headers': 'authorization, content-type, x-work-calendar-key, x-work-calendar-key-id', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS' } : {}
 const reply = (body: unknown, status = 200, origin: string | null = null) => new Response(JSON.stringify(body), { status, headers: { ...cors(origin), 'Content-Type': 'application/json' } })
 async function sha256(value: string) { const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)); return Array.from(new Uint8Array(bytes)).map((part) => part.toString(16).padStart(2, '0')).join('') }
+
+function runtimeServiceKey() {
+  const configuredKey = Deno.env.get('WORK_CALENDAR_DATABASE_KEY')
+  if (configuredKey) return configuredKey
+  const modernKeys = Deno.env.get('SUPABASE_SECRET_KEYS')
+  if (modernKeys) {
+    try {
+      const parsed = JSON.parse(modernKeys) as Record<string, unknown>
+      if (typeof parsed.default === 'string' && parsed.default) return parsed.default
+    } catch {
+      // Fall through for projects that have not enabled the new API-key system.
+    }
+  }
+  const legacyKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (legacyKey) return legacyKey
+  throw new Error('SERVER_MISCONFIGURED')
+}
+
+function parseSchedulePatch(body: unknown) {
+  if (!asObject(body) || typeof body.expectedRevision !== 'string' || !body.expectedRevision || !Array.isArray(body.patches) || !body.patches.length || body.patches.length > 20) throw new Error('INVALID_PATCH')
+  const shiftIds = new Set<string>()
+  for (const patch of body.patches) {
+    if (!asObject(patch) || !['replace_assignee', 'update_window', 'cancel_shift'].includes(String(patch.action)) || typeof patch.shift_id !== 'string' || !idPattern.test(patch.shift_id) || shiftIds.has(patch.shift_id) || !asObject(patch.old) || !asObject(patch.new)) throw new Error('INVALID_PATCH')
+    const old = patch.old, next = patch.new
+    if (typeof old.person_id !== 'string' || !staffIdPattern.test(old.person_id) || (old.role !== 'manager' && old.role !== 'worker') || typeof old.trade_tag !== 'string' || !validDate(old.start_date) || !validDate(old.end_date) || old.start_date > old.end_date) throw new Error('INVALID_PATCH')
+    if (patch.action === 'replace_assignee' && (Object.keys(next).length !== 1 || typeof next.person_id !== 'string' || !staffIdPattern.test(next.person_id))) throw new Error('INVALID_PATCH')
+    if (patch.action === 'update_window' && (Object.keys(next).length !== 2 || !validDate(next.start_date) || !validDate(next.end_date) || next.start_date > next.end_date)) throw new Error('INVALID_PATCH')
+    if (patch.action === 'cancel_shift' && Object.keys(next).length) throw new Error('INVALID_PATCH')
+    shiftIds.add(patch.shift_id)
+  }
+  return { expectedRevision: body.expectedRevision, patches: body.patches as SchedulePatch[] }
+}
 
 function validateProjects(projects: unknown, staff: any) {
   if (!Array.isArray(projects) || projects.length > maxProjects) throw new Error('INVALID_PROJECTS')
@@ -61,17 +101,22 @@ function candidate(operation: string, body: Record<string, any>, existing: any[]
 
 Deno.serve(async (req) => {
   const origin = req.headers.get('origin')
+  const url = new URL(req.url)
+  const schedulePath = url.pathname.endsWith('/schedule')
+  const schedulePreviewPath = url.pathname.endsWith('/schedule/preview')
   if (!allowedOrigins.length) return reply({ error: 'SERVER_MISCONFIGURED' }, 500, origin)
-  if (origin && !cors(origin)) return reply({ error: 'ORIGIN_NOT_ALLOWED' }, 403, origin)
+  if (origin && !allowedOrigin(origin)) return reply({ error: 'ORIGIN_NOT_ALLOWED' }, 403, origin)
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors(origin) })
-  if (req.method !== 'POST') return reply({ error: 'METHOD_NOT_ALLOWED' }, 405, origin)
+  if (!((req.method === 'GET' && schedulePath) || (req.method === 'PATCH' && schedulePath) || (req.method === 'POST' && schedulePreviewPath) || req.method === 'POST')) return reply({ error: 'METHOD_NOT_ALLOWED' }, 405, origin)
   if (Number(req.headers.get('content-length') || '0') > maxBodyBytes) return reply({ error: 'PAYLOAD_TOO_LARGE' }, 413, origin)
-  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+  const admin = createClient(Deno.env.get('SUPABASE_URL')!, runtimeServiceKey())
   const requestId = crypto.randomUUID(), started = performance.now(); let operation = 'unknown'; let principal: Principal = { channel: 'system', role: 'viewer' }
   const audit = async (success: boolean, errorCode?: string, extra: Record<string, unknown> = {}) => admin.from('work_calendar_events').insert({ actor_channel: principal.channel, actor_user_id: principal.userId || null, actor_key_id: principal.keyId || null, actor_role: principal.role, request_id: requestId, operation, success, error_code: errorCode || null, workspace_id: workspaceId, duration_ms: Math.round(performance.now() - started), ...extra })
   try {
-    const raw = await req.text(); if (raw.length > maxBodyBytes) return reply({ error: 'PAYLOAD_TOO_LARGE' }, 413, origin)
-    const body: unknown = JSON.parse(raw); if (!asObject(body) || typeof body.action !== 'string') return reply({ error: 'INVALID_PAYLOAD' }, 400, origin); operation = body.action
+    const raw = req.method === 'GET' ? '' : await req.text(); if (raw.length > maxBodyBytes) return reply({ error: 'PAYLOAD_TOO_LARGE' }, 413, origin)
+    const body: unknown = req.method === 'GET' ? {} : JSON.parse(raw)
+    if (!schedulePath && !schedulePreviewPath && (!asObject(body) || typeof body.action !== 'string')) return reply({ error: 'INVALID_PAYLOAD' }, 400, origin)
+    operation = schedulePath ? (req.method === 'GET' ? 'read_schedule' : 'patch_schedule') : schedulePreviewPath ? 'preview_schedule_patch' : (body as Record<string, any>).action
     if (operation === 'request_login') {
       const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '', ip = req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for') || 'unknown'
       const [{ data: emailAllowed }, { data: ipAllowed }, { data: member }] = await Promise.all([admin.rpc('consume_work_calendar_login_rate', { p_bucket: await sha256(`email:${email}`) }), admin.rpc('consume_work_calendar_login_rate', { p_bucket: await sha256(`ip:${ip}`) }), email ? admin.from('work_calendar_members').select('email').eq('email', email).eq('is_active', true).maybeSingle() : Promise.resolve({ data: null })])
@@ -93,6 +138,36 @@ Deno.serve(async (req) => {
     }
     const getState = async (name: 'projects' | 'staff') => { const { data, error } = await admin.rpc('read_work_calendar_state', { p_workspace_id: workspaceId, p_state_name: name }).maybeSingle(); if (error) throw error; return data ? { payload: data.payload, revision: data.revision } : { payload: name === 'projects' ? [] : { managers: [], workers: [] }, revision: null } }
     const writeState = (name: 'projects' | 'staff', payload: unknown, revision: unknown, history: boolean) => admin.rpc('apply_work_calendar_state', { p_workspace_id: workspaceId, p_state_name: name, p_expected_revision: typeof revision === 'string' ? revision : null, p_payload: payload, p_record_history: history })
+    if (schedulePath && req.method === 'GET') {
+      const personIds = url.searchParams.getAll('person_id')
+      const start = url.searchParams.get('start'), end = url.searchParams.get('end')
+      if (!start || !end || !validDate(start) || !validDate(end) || start > end || personIds.some((id) => !staffIdPattern.test(id))) { await audit(false, 'INVALID_SCOPE'); return reply({ error: 'INVALID_SCOPE' }, 400, origin) }
+      const [{ data: schedule, error: scheduleError }, staff] = await Promise.all([
+        admin.rpc('read_work_calendar_schedule_scope', { p_workspace_id: workspaceId, p_person_ids: personIds, p_start: start, p_end: end }).maybeSingle(),
+        getState('staff'),
+      ])
+      if (scheduleError) throw scheduleError
+      const people = [...((staff.payload as any).managers || []), ...((staff.payload as any).workers || [])]
+        .filter((person: any) => personIds.includes(person.id))
+        .map(({ id, name, sourceSheet, tradeTag }: any) => ({ id, name, sourceSheet, tradeTag }))
+      const result = { revision: schedule?.revision || null, shifts: schedule?.shifts || [], people }
+      await audit(true, undefined, { revision: result.revision, query_scope: { personIds, start, end }, returned_records: result.shifts.length, payload_token_estimate: estimateTokens(result) })
+      return reply(result, 200, origin)
+    }
+    if ((schedulePath && req.method === 'PATCH') || schedulePreviewPath) {
+      if (!can(principal, 'scheduler')) { await audit(false, 'FORBIDDEN'); return reply({ error: 'FORBIDDEN' }, 403, origin) }
+      const { expectedRevision, patches } = parseSchedulePatch(body)
+      const { data, error } = await admin.rpc('apply_schedule_patch', { p_workspace_id: workspaceId, p_expected_revision: expectedRevision, p_patches: patches, p_dry_run: schedulePreviewPath })
+      if (error) throw error
+      const result = Array.isArray(data) ? data[0] : data
+      if (!result || result.status !== 'OK') {
+        const code = result?.status || 'INTERNAL_ERROR', status = code === 'REVISION_MISMATCH' || code === 'PATCH_PRECONDITION_FAILED' ? 409 : code === 'SHIFT_NOT_FOUND' ? 404 : code === 'FORBIDDEN' ? 403 : 422
+        await audit(false, code, { revision: result?.revision || null, change_summary: { shift_ids: patches.map((patch) => patch.shift_id) } })
+        return reply({ error: code, revision: result?.revision || null }, status, origin)
+      }
+      await audit(true, undefined, { revision: result.revision, returned_records: patches.length, payload_token_estimate: estimateTokens(patches), change_summary: { operation, shift_ids: patches.map((patch) => patch.shift_id), actions: patches.map((patch) => patch.action) } })
+      return reply({ ok: true, revision: result.revision, applied: result.applied || [] }, 200, origin)
+    }
     if (operation === 'read') {
       const [projects, staff] = await Promise.all([getState('projects'), getState('staff')]); const scope = asObject(body.scope) ? body.scope : {}; const visible = (projects.payload as any[]).filter((project) => (!scope.projectId || project.id === scope.projectId) && (!scope.start || !scope.end || overlap(project.startDate, project.endDate, String(scope.start), String(scope.end)))).slice(0, 200); const simplify = (group: any[]) => group.map(({ id, name, sourceSheet, tradeTag }) => ({ id, name, sourceSheet, tradeTag }))
       const result = { projects: visible, staff: { managers: simplify((staff.payload as any).managers || []), workers: simplify((staff.payload as any).workers || []) }, revision: projects.revision, staffRevision: staff.revision, capabilities: { role: principal.role, canSchedule: can(principal, 'scheduler'), canManageRoster: can(principal, 'roster_admin'), canViewMetrics: can(principal, 'roster_admin') } }
@@ -103,6 +178,7 @@ Deno.serve(async (req) => {
       const [projects, staff] = await Promise.all([getState('projects'), getState('staff')]); const command = operation === 'preview' ? String(body.mutation || '') : operation; const next = validateProjects(candidate(command, body, projects.payload as any[]), staff.payload)
       if (operation === 'preview') { await audit(true, undefined, { returned_records: next.length, payload_token_estimate: estimateTokens(next) }); return reply({ ok: true }, 200, origin) }
       const { data: applied, error } = await writeState('projects', next, body.expectedRevision, true); if (error) throw error; if (applied.status === 'REVISION_MISMATCH') { await audit(false, 'REVISION_MISMATCH', { revision: applied.revision }); return reply({ error: 'REVISION_MISMATCH', revision: applied.revision }, 409, origin) }
+      const { error: syncError } = await admin.rpc('sync_work_calendar_schedule_from_state', { p_workspace_id: workspaceId }); if (syncError) throw syncError
       await audit(true, undefined, { revision: applied.revision, returned_records: next.length, payload_token_estimate: estimateTokens(next), created_project_count: operation === 'create_project' ? 1 : 0, change_summary: { operation, project_ids: operation === 'delete_projects' ? body.deleteProjectIds : [body.project.id] } }); return reply({ ok: true, revision: applied.revision }, 200, origin)
     }
     if (operation === 'apply_staff') {

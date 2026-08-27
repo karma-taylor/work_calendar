@@ -77,3 +77,16 @@ begin
 end; $$;
 revoke all on function public.purge_work_calendar_retention(interval, interval) from public;
 grant execute on function public.purge_work_calendar_retention(interval, interval) to service_role;
+
+-- RLS remains enabled for all application tables. The Edge Function connects
+-- with the service_role and therefore also needs SQL object privileges; RLS
+-- alone does not grant those privileges on a newly-created project.
+grant usage on schema public to service_role;
+grant select, insert, update on table public.app_state to service_role;
+grant select, insert on table public.app_state_history to service_role;
+grant select, insert, update on table public.work_calendar_members to service_role;
+grant select, insert, update on table public.work_calendar_api_keys to service_role;
+grant select, insert on table public.work_calendar_events to service_role;
+grant select, insert, update, delete on table public.work_calendar_login_rate_limits to service_role;
+grant usage, select on sequence public.app_state_history_id_seq to service_role;
+grant usage, select on sequence public.work_calendar_events_id_seq to service_role;

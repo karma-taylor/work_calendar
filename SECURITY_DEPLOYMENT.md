@@ -2,7 +2,7 @@
 
 Run this sequence in a new Supabase staging project before touching production.
 
-1. Apply both SQL migrations in order. Create the intended web member with an explicit role:
+1. Apply all SQL migrations in order, including `202608240003_schedule_delta.sql`. The third migration creates the normalized shift projection and imports the existing anonymous `app_state` projects. Create the intended web member with an explicit role:
 
    ```sql
    insert into public.work_calendar_members (email, role)
@@ -33,6 +33,8 @@ Run this sequence in a new Supabase staging project before touching production.
    - revoked key, invalid key ID, expired key, invalid JWT, and an off-origin browser request are rejected;
    - a missing project in an update is not deleted; deletion requires explicit IDs and a current revision;
    - duplicate assignment, overlapping assignment, invalid role, oversized body, and invalid staff record are rejected;
+   - a scoped `GET /schedule` followed by `POST /schedule/preview` and `PATCH /schedule` changes only the requested `shift_id`;
+   - stale revision, stale `old` assertion, missing replacement person, incompatible trade, and replacement-person overlap all return errors without changing any shift;
    - event rows contain role and actor identity but no secret or raw prompt.
 
 6. Production cutover: back up anonymous state, apply migrations, deploy the function, create a new production Skill key record, update `WORK_CALENDAR_API_KEY_ID` and the secret in Codex, then revoke every retired key row. Re-run the checks above against production.

@@ -13,6 +13,8 @@ dist-ssr
 *.local
 .env
 work-calendar-private/
+supabase/.temp/
+.playwright-cli/
 
 # Sensitive local roster. This file may contain identity documents and must
 # never be committed, even when it has been anonymized for local use.
