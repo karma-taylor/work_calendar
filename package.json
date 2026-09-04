@@ -14,8 +14,12 @@
     "seed:staging": "tsx scripts/seed-staging.ts",
     "verify:staging-patch": "node scripts/verify-staging-patch.mjs",
     "eval:intent": "node scripts/evaluate-intent.mjs",
+    "eval:skill": "node scripts/run-skill-evals.mjs",
+    "record:skill-failure": "node scripts/record-skill-trajectory.mjs",
+    "skillopt": "python3 scripts/skillopt_pipeline.py",
     "test:security": "node tests/security-contract.mjs",
-    "test:patch": "node tests/schedule-patch-contract.mjs"
+    "test:patch": "node tests/schedule-patch-contract.mjs",
+    "test:skill-quality": "node tests/skill-quality-contract.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

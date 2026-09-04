@@ -1,0 +1,10 @@
+{
+  "patches": [
+    {
+      "op": "replace_block",
+      "block_id": "skillopt-intent-guidance",
+      "content": "For a person replacement, resolve both identities from the roster before proposing a patch. If either identity is missing or ambiguous, stop and ask for the company/source sheet."
+    }
+  ],
+  "rationale": "The failure trajectory shows that ambiguity was handled after patch construction. The edit moves identity resolution before proposal generation without changing confirmation or API rules."
+}

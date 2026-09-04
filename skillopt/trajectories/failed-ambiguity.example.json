@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "occurredAt": "2026-09-04T08:00:00Z",
+  "skillVersion": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "intent": "reassign",
+  "parsedFields": {"sourcePersonRef":"alias:7f3a02ce", "targetPersonRef":"alias:2b19af43", "dateResolution":"relative_next_wednesday"},
+  "operation": "preview_schedule_patch",
+  "expectedRevisionState": "fresh",
+  "outcome": "failed",
+  "failureCategory": "DUPLICATE_PERSON",
+  "errorCode": "AMBIGUOUS_PERSON",
+  "durationMs": 84
+}

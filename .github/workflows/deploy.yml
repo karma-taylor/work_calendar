@@ -26,6 +26,7 @@ jobs:
       - run: npm run lint
       - run: npm run test:security
       - run: npm run test:patch
+      - run: npm run test:skill-quality
       - run: npm run build
       - name: Deploy staging Edge Function
         env:

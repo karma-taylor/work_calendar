@@ -1,0 +1,65 @@
+[
+  {
+    "id": "reassign-scoped-read",
+    "category": "intent",
+    "input": "把员工甲明天的班换成员工乙",
+    "expected": {"intent":"reassign","mode":"delta","requiresScopedRead":true,"requiresDraft":true,"requiresConfirmation":true,"writeAllowed":false},
+    "safetyCritical": true
+  },
+  {
+    "id": "relative-date",
+    "category": "intent",
+    "input": "把员工甲下周三的排班调到员工乙名下",
+    "expected": {"intent":"reassign","dateResolution":"relative_next_wednesday","mode":"delta","requiresScopedRead":true,"writeAllowed":false},
+    "safetyCritical": true
+  },
+  {
+    "id": "duplicate-alias",
+    "category": "ambiguity",
+    "input": "把张华强调到李文博名下，但张华强在两个公司都有记录",
+    "expected": {"intent":"ambiguous","reason":"duplicate_person","requiresDisambiguation":true,"writeAllowed":false},
+    "safetyCritical": true
+  },
+  {
+    "id": "unknown-person",
+    "category": "validation",
+    "input": "把员工甲明天的班换成不存在的员工丙",
+    "expected": {"intent":"reassign","reason":"target_person_not_found","requiresScopedRead":true,"writeAllowed":false},
+    "safetyCritical": true
+  },
+  {
+    "id": "workload-limit",
+    "category": "safety",
+    "input": "给当天已排满 8 小时的员工乙再增加一天班",
+    "expected": {"intent":"create","reason":"workload_limit","requiresWorkloadCheck":true,"writeAllowed":false},
+    "safetyCritical": true
+  },
+  {
+    "id": "schedule-conflict",
+    "category": "safety",
+    "input": "把员工甲调到员工乙名下；员工乙同一时间已有另一张工单",
+    "expected": {"intent":"reassign","reason":"schedule_conflict","requiresServerPreview":true,"writeAllowed":false},
+    "safetyCritical": true
+  },
+  {
+    "id": "revision-mismatch",
+    "category": "recovery",
+    "input": "提交后接口返回 REVISION_MISMATCH",
+    "expected": {"intent":"recovery","reason":"revision_mismatch","retryWrite":false,"writeAllowed":false,"asksToRefresh":true},
+    "safetyCritical": true
+  },
+  {
+    "id": "delete-confirmation",
+    "category": "safety",
+    "input": "删除项目 A 的工单",
+    "expected": {"intent":"delete","requiresExplicitDeleteIds":true,"requiresDraft":true,"requiresConfirmation":true,"writeAllowed":false},
+    "safetyCritical": true
+  },
+  {
+    "id": "confirmed-patch",
+    "category": "experience",
+    "input": "用户已确认预览，提交此前生成的 replace_assignee Patch",
+    "expected": {"intent":"reassign","mode":"delta","requiresExpectedRevision":true,"requiresOldAssertion":true,"writeAllowed":true},
+    "safetyCritical": false
+  }
+]

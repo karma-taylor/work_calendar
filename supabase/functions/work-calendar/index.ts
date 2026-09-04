@@ -22,7 +22,16 @@ const overlap = (aStart: string, aEnd: string, bStart: string, bEnd: string) => 
 const can = (principal: Principal, required: Role) => rank[principal.role] >= rank[required]
 const estimateTokens = (value: unknown) => Math.ceil(JSON.stringify(value).length / 4)
 const allowedOrigin = (origin: string | null) => Boolean(origin && allowedOrigins.includes(origin))
-const cors = (origin: string | null) => allowedOrigin(origin) ? { 'Access-Control-Allow-Origin': origin!, Vary: 'Origin', 'Access-Control-Allow-Headers': 'authorization, content-type, x-work-calendar-key, x-work-calendar-key-id', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS' } : {}
+const diagnosticCasePattern = /^[a-z0-9][a-z0-9-]{0,95}$/
+const failureCategory = (errorCode?: string) => {
+  if (!errorCode) return null
+  if (['SCHEDULING_CONFLICT', 'PATCH_PRECONDITION_FAILED', 'SHIFT_NOT_FOUND'].includes(errorCode)) return 'SCHEDULE_VALIDATION'
+  if (errorCode === 'REVISION_MISMATCH') return 'REVISION_MISMATCH'
+  if (['FORBIDDEN', 'NOT_ALLOWLISTED', 'INVALID_JWT', 'INVALID_API_KEY', 'UNAUTHORIZED'].includes(errorCode)) return 'AUTHORIZATION'
+  if (['INVALID_PATCH', 'INVALID_SCOPE', 'INVALID_PAYLOAD', 'INVALID_PROJECT', 'INVALID_ASSIGNMENT'].includes(errorCode)) return 'REQUEST_VALIDATION'
+  return 'INTERNAL'
+}
+const cors = (origin: string | null) => allowedOrigin(origin) ? { 'Access-Control-Allow-Origin': origin!, Vary: 'Origin', 'Access-Control-Allow-Headers': 'authorization, content-type, x-work-calendar-key, x-work-calendar-key-id, x-work-calendar-evaluation-case-id', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS' } : {}
 const reply = (body: unknown, status = 200, origin: string | null = null) => new Response(JSON.stringify(body), { status, headers: { ...cors(origin), 'Content-Type': 'application/json' } })
 async function sha256(value: string) { const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)); return Array.from(new Uint8Array(bytes)).map((part) => part.toString(16).padStart(2, '0')).join('') }
 
@@ -111,7 +120,8 @@ Deno.serve(async (req) => {
   if (Number(req.headers.get('content-length') || '0') > maxBodyBytes) return reply({ error: 'PAYLOAD_TOO_LARGE' }, 413, origin)
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, runtimeServiceKey())
   const requestId = crypto.randomUUID(), started = performance.now(); let operation = 'unknown'; let principal: Principal = { channel: 'system', role: 'viewer' }
-  const audit = async (success: boolean, errorCode?: string, extra: Record<string, unknown> = {}) => admin.from('work_calendar_events').insert({ actor_channel: principal.channel, actor_user_id: principal.userId || null, actor_key_id: principal.keyId || null, actor_role: principal.role, request_id: requestId, operation, success, error_code: errorCode || null, workspace_id: workspaceId, duration_ms: Math.round(performance.now() - started), ...extra })
+  const evaluationCaseId = req.headers.get('x-work-calendar-evaluation-case-id') || null
+  const audit = async (success: boolean, errorCode?: string, extra: Record<string, unknown> = {}) => admin.from('work_calendar_events').insert({ actor_channel: principal.channel, actor_user_id: principal.userId || null, actor_key_id: principal.keyId || null, actor_role: principal.role, request_id: requestId, operation, success, error_code: errorCode || null, workspace_id: workspaceId, duration_ms: Math.round(performance.now() - started), skill_version: principal.channel === 'skill' ? Deno.env.get('WORK_CALENDAR_SKILL_VERSION') || null : null, evaluation_case_id: principal.channel === 'skill' && evaluationCaseId && diagnosticCasePattern.test(evaluationCaseId) ? evaluationCaseId : null, failure_category: failureCategory(errorCode), ...extra })
   try {
     const raw = req.method === 'GET' ? '' : await req.text(); if (raw.length > maxBodyBytes) return reply({ error: 'PAYLOAD_TOO_LARGE' }, 413, origin)
     const body: unknown = req.method === 'GET' ? {} : JSON.parse(raw)
@@ -194,7 +204,7 @@ Deno.serve(async (req) => {
     }
     if (operation === 'metrics') {
       if (!can(principal, 'roster_admin')) { await audit(false, 'FORBIDDEN'); return reply({ error: 'FORBIDDEN' }, 403, origin) }
-      const since = typeof body.since === 'string' && new Date(body.since) > new Date(Date.now() - 90 * 86400000) ? body.since : new Date(Date.now() - 30 * 86400000).toISOString(); const { data, error } = await admin.from('work_calendar_events').select('actor_channel,actor_role,operation,success,error_code,duration_ms,payload_token_estimate,created_project_count,created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(1000); if (error) throw error; await audit(true); return reply({ events: data || [] }, 200, origin)
+      const since = typeof body.since === 'string' && new Date(body.since) > new Date(Date.now() - 90 * 86400000) ? body.since : new Date(Date.now() - 30 * 86400000).toISOString(); const { data, error } = await admin.from('work_calendar_events').select('actor_channel,actor_role,operation,success,error_code,failure_category,skill_version,evaluation_case_id,duration_ms,payload_token_estimate,created_project_count,created_at').gte('created_at', since).order('created_at', { ascending: false }).limit(1000); if (error) throw error; await audit(true); return reply({ events: data || [] }, 200, origin)
     }
     await audit(false, 'UNKNOWN_ACTION'); return reply({ error: 'UNKNOWN_ACTION' }, 400, origin)
   } catch (error) { const code = error instanceof Error && /^[A-Z_]+(?::[A-Za-z0-9_-]+)?$/.test(error.message) ? error.message.split(':')[0] : 'INTERNAL_ERROR'; await audit(false, code); return reply({ error: code }, code === 'SCHEDULING_CONFLICT' ? 422 : 400, origin) }

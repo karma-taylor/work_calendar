@@ -96,6 +96,8 @@ npm run audit:local-secrets
    ```text
    supabase/migrations/202608230001_work_calendar_security.sql
    supabase/migrations/202608230002_security_hardening.sql
+   supabase/migrations/202608240003_schedule_delta.sql
+   supabase/migrations/202609040004_skill_quality_observability.sql
    ```
 
 2. 在 `work_calendar_members` 建立白名单和角色：`viewer` 只读、`scheduler` 可管理工单、`roster_admin` 可管理人员名单与工种。
@@ -106,7 +108,10 @@ npm run audit:local-secrets
    ```text
    WORK_CALENDAR_ALLOWED_ORIGIN=https://你的站点域名
    WORK_CALENDAR_WORKSPACE_ID=default
+   WORK_CALENDAR_SKILL_VERSION=sha256:<已人工批准的-Skill-文件哈希>
    ```
+
+   `WORK_CALENDAR_SKILL_VERSION` 仅用于将已批准的规则版本写入脱敏审计事件；每次人工发布候选 Skill 后同步更新它，不接受客户端传入的版本号。
 
 6. 为 Skill 创建有 `key_id` 的 SHA-256 哈希记录；明文 Key 仅保存在本机的 `WORK_CALENDAR_API_KEY` 环境变量，绝不写入网页、仓库或数据库。
 7. 在 Supabase Cron 中每日执行 `select public.purge_work_calendar_retention();`，以清理超过保留期的事件和快照。
@@ -132,7 +137,7 @@ npm run verify:staging-patch -- --apply # 写入一次，再验证陈旧 revisio
 
 ### GitHub Actions：仅部署 staging 后端
 
-[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) 会在 `main` 收到推送后依次运行 lint、权限契约测试、Patch 契约测试与构建；全部通过才部署 **staging** 的 `work-calendar` Edge Function。请在 GitHub 的 `staging` Environment 中设置下列 Secrets，不能用生产值：
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) 会在 `main` 收到推送后依次运行 lint、权限契约测试、Patch 契约测试、Skill 质量契约测试与构建；全部通过才部署 **staging** 的 `work-calendar` Edge Function。请在 GitHub 的 `staging` Environment 中设置下列 Secrets，不能用生产值：
 
 - `SUPABASE_ACCESS_TOKEN`：专用、可轮换的 Supabase PAT；
 - `SUPABASE_STAGING_PROJECT_REF`：staging 项目 Ref。
@@ -170,6 +175,7 @@ workspace revision 并只更新 Patch 指向的班次行。若 revision 或旧�
 - 事件审计记录来源、角色、操作、结果、错误码、耗时、revision 和摘要，不保存密钥、原始对话或真实姓名。
 - 事件默认保留 90 天，历史快照默认保留 365 天。
 - 范围优先读取与精简 payload 控制 Token 成本；服务端记录端到端耗时，目标 P95 不超过 1 秒。
+- Skill 失败只可记录脱敏结构化轨迹；候选规则受限编辑、同集评测和人工审批后才可发布。详见 [Skill 质量闭环](docs/skill-quality-loop.md)。
 
 ## 质量验证
 
@@ -178,6 +184,7 @@ npm run lint
 npm run build
 npm run test:security
 npm run test:patch
+npm run test:skill-quality
 ```
 
 中文自然语言指令评测位于 `tests/accuracy-fixtures.json`。将模型解析结果保存为 JSON 后执行：

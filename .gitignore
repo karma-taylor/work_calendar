@@ -9,6 +9,14 @@ lerna-debug.log*
 
 node_modules
 dist
+evals/results/*
+!evals/results/.gitkeep
+skillopt/trajectories/*
+!skillopt/trajectories/.gitkeep
+!skillopt/trajectories/*.example.json
+skillopt/candidates/*
+!skillopt/candidates/.gitkeep
+skillopt/release-log.jsonl
 dist-ssr
 *.local
 .env
